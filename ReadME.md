@@ -9,7 +9,9 @@ The idea is that the API provides easy-to-use and flexible engine-functionalitie
 
 The API doesn't provide a build-in window-creation or input system since the idea is to make it as flexible as possible. Instead of having a window class, the API provides functionality to copy a rendered frame to your swapchain.
 
-### Classes
+Right now this repository contains both the editor and engine, but the longterm plan is to split them into two seperate repositories.
+
+### Structure
 *Core classes*
  - Engine
 	 - Main interface of the engine.
@@ -17,20 +19,20 @@ The API doesn't provide a build-in window-creation or input system since the ide
 
 *Core api interfaces*
  - Scene
-	 - Interface to store and modify entities in your scene.
+	 - Used to store and modify entities in your scene.
  - Renderer
-	 - Interface for all render-related functionality such as rendering scenes, render-settings, updating the renderstate of entities, and more...
+	 - Interface for all render-related functionality such as rendering scenes, render-settings, and more...
  - RenderTarget
-     - Interface that represents a color render target.
+     - To be implemented
  - DepthStencilTarget
-     - Interface that represents a depth and stencil render target.
+     - Interface that represents a depth and stencil target.
  - Swapchain
      - Interface that connects the rendered frames to the application window.
 
 ### Usage Guide
 SETUP GUIDE FOR VISUAL STUDIO
 
-Requires at least Windows Kits 10.0.22621.0. Try installing the most up-to-date version of VS2022.
+Try installing the most up-to-date version of VS2022.
 
 1. Clone repo
 
@@ -42,17 +44,19 @@ Requires at least Windows Kits 10.0.22621.0. Try installing the most up-to-date 
 
 5. Run with F5 
 
-### Implemented Features
+<!-- ### Implemented Features in this -->
+
+### Features in the old engine that will be integrated in this
  - Fully gpu-driven rendering pipeline using compute shaders, mesh shaders and indirect drawing. Includes per-object and per-meshlet frustum culling.
  - Normal mapping
  - Shader hot-reloading and reflection that enables binding by shader resource name
- - Mesh and audio loading
+ - Mesh, texture, and audio loading
  - Integrated audio engine
  - Entity-based scene configuration
+ - Texture mip map and compression support
+ - Integrated physics system with rigidbody and collider components
 
-### Features in the old engine that will be integrated in this
  - Dynamic amount of point, spot, and directional lights with frustrum culling for the first two
- - Asset loading (mesh, texture, materials, etc)
  - Deferred rendering (will probably be skipped for a more modern rendering technique)
  - Per-entity outlines (post process)
  - Color-based entity picking (optional)
@@ -71,10 +75,8 @@ Requires at least Windows Kits 10.0.22621.0. Try installing the most up-to-date 
  - Cascading shadow maps
  - Omnidirectional shadow maps
  - Integrated scripting system using Mono
- - Texture mip map support, including in-engine generation
+ - In-engine texture compression and mip generation
  - Mesh lod support
  - SMAA
  - Compute-based skeletal animation
- - Integrated physics system with rigidbody and collider components
- - Interface to build render passes and configure the render graph
-"# aZero-Engine" 
+ - Rendergraph
