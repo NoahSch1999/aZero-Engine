@@ -73,7 +73,7 @@ namespace aZero
 
 			PhysicsWorld() = default;
 
-			Body CreateBody(const JPH::BodyCreationSettings& settings, bool addToPhysics = true);
+			std::optional<aZero::Physics::Body> CreateBody(const JPH::BodyCreationSettings& settings, bool addToPhysics = true);
 			void AddBodiesToPhysics(const std::vector<Body>& bodies);
 			void FreezeBodies(const std::vector<Body>& bodies);
 			void DestroyBody(const Body& body) { m_BodyInterface->RemoveBody(body.m_ID); m_BodyInterface->DestroyBody(body.m_ID); }

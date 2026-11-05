@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include "Core.hpp"
 #include "Semaphore.hpp"
 #include "CommandPool.hpp"
@@ -59,6 +60,7 @@ namespace aZero::RenderAPI
             std::swap(m_BackBufferViews, other.m_BackBufferViews);
             std::swap(m_ImageReadySemaphores, other.m_ImageReadySemaphores);
             std::swap(m_RenderCompleteSemaphores, other.m_RenderCompleteSemaphores);
+            std::swap(m_GraphicsQueue, other.m_GraphicsQueue);
             return *this;
         }
 
@@ -141,6 +143,9 @@ namespace aZero::RenderAPI
                 }
             }
 
+
+            m_GraphicsQueue.Init(core, RenderAPI::EQueueType::Graphics);
+
             m_Surface = desc.Surface;
             m_CreateInfo = swapchainCI;
             m_diCore = &core;
@@ -222,13 +227,10 @@ namespace aZero::RenderAPI
             chkSwapchain(vkAcquireNextImageKHR(m_diCore->GetLogicalDevice(), m_Swapchain, UINT64_MAX, m_ImageReadySemaphores.at(m_CurrentFrameIndex).Get(), VK_NULL_HANDLE, &m_CurrentBackBuffer)); // might not give us imageIndex that are in consecutive order, so we have a seperate index for the current swapchain and frameindex
         }
 
-        void Present(const PresentDesc& desc)
+        void Present()
         {
-            std::vector<VkSemaphore> waitOnSemaphores(desc.WaitOnSemaphores.size());
-            for (uint32_t i = 0; i < waitOnSemaphores.size(); i++)
-            {
-                waitOnSemaphores[i] = desc.WaitOnSemaphores[i]->Get();
-            }
+            auto x = this->GetRenderCompletedSemaphore();
+            std::array<VkSemaphore, 1> waitOnSemaphores{ this->GetRenderCompletedSemaphore()->Get() };
 
             VkPresentInfoKHR presentInfo{
                 .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -238,7 +240,7 @@ namespace aZero::RenderAPI
                 .pSwapchains = &m_Swapchain,
                 .pImageIndices = &m_CurrentBackBuffer
             };
-            chkSwapchain(vkQueuePresentKHR(desc.Queue->Get(), &presentInfo));
+            chkSwapchain(vkQueuePresentKHR(m_GraphicsQueue.Get(), &presentInfo));
         }
 
         uint32_t GetFramesInFlight() const { return m_BackBuffers.size(); }
@@ -253,6 +255,7 @@ namespace aZero::RenderAPI
 	private:
         uint32_t m_CurrentFrameIndex;
         uint32_t m_CurrentBackBuffer;
+        RenderAPI::CommandQueue m_GraphicsQueue;
         VkSurfaceKHR m_Surface;
 		VkSwapchainKHR m_Swapchain;
         VkSwapchainCreateInfoKHR m_CreateInfo;

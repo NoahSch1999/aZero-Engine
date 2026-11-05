@@ -1,5 +1,7 @@
 #pragma once
 #include "PhysicsWorld.hpp"
+#include <utility>
+#include "misc/NonMoveCopy.hpp"
 
 namespace aZero
 {
@@ -54,6 +56,19 @@ namespace aZero
 		public:
 			PhysicsEngine();
 			~PhysicsEngine();
+			PhysicsEngine(PhysicsEngine&& other) noexcept
+			{
+				*this = std::move(other);
+			}
+
+			PhysicsEngine& operator=(PhysicsEngine&& other) noexcept
+			{
+				std::swap(m_JobSystem, other.m_JobSystem);
+				std::swap(m_BroadPhaseLayerInterface, other.m_BroadPhaseLayerInterface);
+				std::swap(m_ObjectVsBroadPhaseLayerInterface, other.m_ObjectVsBroadPhaseLayerInterface);
+				std::swap(m_ObjectLayerPairInterface, other.m_ObjectLayerPairInterface);
+				return *this;
+			}
 			void CreateWorld(PhysicsWorld& world, float updateFrequency = 1.0f / 60.f, uint32_t maxBodies = 1024, uint32_t maxBodyPairs = 1024, uint32_t maxContactConstraints = 1024, uint32_t maxBodyMutexes = 0);
 
 		private:

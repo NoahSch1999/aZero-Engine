@@ -1,4 +1,5 @@
 #include "PhysicsWorld.hpp"
+#include <optional>
 
 /*
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -19,7 +20,7 @@ void aZero::Physics::PhysicsWorld::Init(JPH::JobSystemThreadPool& jobSystem, flo
 	m_UpdateFrequency = updateFrequency;
 }
 
-aZero::Physics::Body aZero::Physics::PhysicsWorld::CreateBody(const JPH::BodyCreationSettings& settings, bool addToPhysics)
+std::optional<aZero::Physics::Body> aZero::Physics::PhysicsWorld::CreateBody(const JPH::BodyCreationSettings& settings, bool addToPhysics)
 {
 	JPH::Body* body = m_BodyInterface->CreateBody(settings);
 	if (body && addToPhysics)
@@ -29,7 +30,7 @@ aZero::Physics::Body aZero::Physics::PhysicsWorld::CreateBody(const JPH::BodyCre
 
 	if (!body)
 	{
-		throw std::runtime_error("Cannot create new Jolt body"); // TODO: Handle if theres no more space for any more bodies
+		return std::nullopt;
 	}
 
 	return Body(body->GetID(), *m_BodyInterface, m_System.GetBodyLockInterface());

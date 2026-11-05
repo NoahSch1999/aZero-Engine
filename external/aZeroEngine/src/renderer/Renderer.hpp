@@ -6,10 +6,10 @@
 #include "asset/Material.hpp"
 #include "asset/Texture.hpp"
 #include "asset/Mesh.hpp"
-#include "render_api/DepthStencilImage.hpp"
 #include "ResourceRecycler.hpp"
 #include "render_api/Compiler.hpp"
 #include "render_api/RenderPass.hpp"
+#include "RenderTarget.hpp"
 
 namespace aZero::Renderer
 {
@@ -207,16 +207,26 @@ namespace aZero::Renderer
 		bool NextFrame(uint64_t waitTimeout = UINT64_MAX)
 		{
 			uint64_t lastFrameIndex = m_FrameIndex;
-			m_FrameContexts[lastFrameIndex].SignalComplete(m_GraphicsQueue, m_RenderSemaphore);
 
-			m_FrameIndex = (m_FrameIndex + 1) % m_FrameContexts.size();
+			if (!m_HasSignalledFrameComplete)
+			{
+				m_FrameContexts[lastFrameIndex].SignalComplete(m_GraphicsQueue, m_RenderSemaphore);
+				m_HasSignalledFrameComplete = true;
+			}
 
-			aZero::Renderer::FrameContext& nextFrameContext = m_FrameContexts[m_FrameIndex];
+			uint64_t newFrameIndex = (m_FrameIndex + 1) % m_FrameContexts.size();
+
+			aZero::Renderer::FrameContext& nextFrameContext = m_FrameContexts[newFrameIndex];
 			const VkResult result = nextFrameContext.CheckCompleted(m_RenderSemaphore, waitTimeout);
 			if (result != VkResult::VK_SUCCESS)
 			{
 				return false;
 			}
+
+			// This is updated AFTER the frame can start to be able to loop on the ::NextFrame() until its ready
+			m_FrameIndex = newFrameIndex;
+			m_HasSignalledFrameComplete = false; // We also reset this to false for the next ::NextFrame() call...
+
 			m_CommandManager.NextFrame(m_FrameIndex);
 			m_ResourceRecycler.NextFrame(m_FrameIndex);
 
@@ -225,9 +235,8 @@ namespace aZero::Renderer
 
 		struct RenderDesc
 		{
-			RenderAPI::Image* ColorTarget;
-			RenderAPI::DepthStencilImage* DepthStencil;
-			RenderAPI::ImageView* ColorView;
+			aZero::Renderer::RenderTarget* ColorTarget;
+			aZero::Renderer::RenderTarget* DepthStencil;
 		};
 
 		void Render(const RenderDesc& desc)
@@ -237,7 +246,7 @@ namespace aZero::Renderer
 			cb.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
 			if (
-				desc.ColorTarget->GetTransition().newLayout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+				desc.ColorTarget->m_Image.GetTransition().newLayout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 				)
 			{
 				RenderAPI::Image::TransitionDesc srcDesc {
@@ -248,19 +257,19 @@ namespace aZero::Renderer
 				};
 
 
-				desc.ColorTarget->Transition(srcDesc);
+				desc.ColorTarget->m_Image.Transition(srcDesc);
 
-				cb.Barrier({}, { desc.ColorTarget->GetTransition() }, {});
+				cb.Barrier({}, { desc.ColorTarget->m_Image.GetTransition() }, {});
 			}
 
 			Pipeline::RenderPass::RenderDesc::ColorTarget colorTarget{
-				.View = desc.ColorView->Get()
+				.View = desc.ColorTarget->m_View.Get()
 			};
 			Pipeline::RenderPass::RenderDesc renderDesc{};
 			renderDesc.ColorTargets = { colorTarget };
 			//renderDesc.DescriptorSets
-			renderDesc.RenderHeight = desc.ColorTarget->GetDesc().Height;
-			renderDesc.RenderWidth = desc.ColorTarget->GetDesc().Width;
+			renderDesc.RenderHeight = desc.ColorTarget->m_Image.GetDesc().Height;
+			renderDesc.RenderWidth = desc.ColorTarget->m_Image.GetDesc().Width;
 			renderDesc.Callback = [&](RenderAPI::CommandBuffer& cbuff, aZero::Pipeline::RenderPass& pass) {
 				auto b1 = pass.GetPushConstantBinding("Constants", "Color");
 				cbuff.SetPushConstants(b1, glm::vec3(1, 0, 1));
@@ -272,12 +281,12 @@ namespace aZero::Renderer
 				VkViewport viewport{
 					   .x = 0.f,
 					   .y = 0.f,
-					   .width = static_cast<float>(desc.ColorTarget->GetDesc().Width),
-					   .height = static_cast<float>(desc.ColorTarget->GetDesc().Height),
+					   .width = static_cast<float>(desc.ColorTarget->m_Image.GetDesc().Width),
+					   .height = static_cast<float>(desc.ColorTarget->m_Image.GetDesc().Height),
 					   .minDepth = 0.0f,
 					   .maxDepth = 1.0f
 				};
-				VkRect2D scissor{ .extent{.width = static_cast<uint32_t>(desc.ColorTarget->GetDesc().Width), .height = static_cast<uint32_t>(desc.ColorTarget->GetDesc().Height) } };
+				VkRect2D scissor{ .extent{.width = static_cast<uint32_t>(desc.ColorTarget->m_Image.GetDesc().Width), .height = static_cast<uint32_t>(desc.ColorTarget->m_Image.GetDesc().Height) } };
 				cb.SetScizzorRectsAndViewports({ viewport }, { scissor });
 
 				cb.SetVertexBuffer(testVB, 0);
@@ -337,7 +346,7 @@ namespace aZero::Renderer
 			m_GraphicsQueue.SubmitCommandBuffers(submitDesc);
 		}
 
-		void PresentSwapchain(RenderAPI::Image& srcImage, aZero::RenderAPI::Swapchain& swapchain)
+		void CopyToSwapchain(aZero::Renderer::RenderTarget& srcTarget, aZero::RenderAPI::Swapchain& swapchain)
 		{
 			aZero::Renderer::FrameContext& frameContext = m_FrameContexts[m_FrameIndex];
 			RenderAPI::CommandBuffer cb = m_CommandManager.GetBuffer();
@@ -362,11 +371,11 @@ namespace aZero::Renderer
 				.SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
 			};
 
-			srcImage.Transition(srcDesc);
+			srcTarget.m_Image.Transition(srcDesc);
 
-			cb.Barrier({}, { scBarrier, srcImage.GetTransition()}, {});
+			cb.Barrier({}, { scBarrier, srcTarget.m_Image.GetTransition()}, {});
 
-			cb.Copy(srcImage, swapchain.GetCurrentBackBuffer(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+			cb.Copy(srcTarget.m_Image, swapchain.GetCurrentBackBuffer(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 			scBarrier = {
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -387,9 +396,9 @@ namespace aZero::Renderer
 				.SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
 			};
 
-			srcImage.Transition(srcDesc);
+			srcTarget.m_Image.Transition(srcDesc);
 
-			cb.Barrier({}, { scBarrier, srcImage.GetTransition() }, {});
+			cb.Barrier({}, { scBarrier, srcTarget.m_Image.GetTransition() }, {});
 
 			cb.StopRecording();
 
@@ -400,12 +409,16 @@ namespace aZero::Renderer
 			   .SignalSemaphores = {{.SemaphorePtr = swapchain.GetRenderCompletedSemaphore(), .Stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}, {.SemaphorePtr = &m_RenderSemaphore, .Stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}}
 			};
 			m_GraphicsQueue.SubmitCommandBuffers(submitDesc);
+		}
 
-			RenderAPI::Swapchain::PresentDesc presentDesc{
-				.Queue = &m_GraphicsQueue,
-				.WaitOnSemaphores = { swapchain.GetRenderCompletedSemaphore() }
-			};
-			swapchain.Present(presentDesc);
+		std::optional<RenderTarget> CreateRenderTarget(const glm::uvec2& dimensions, ERenderTargetType type)
+		{
+			aZero::Renderer::RenderTarget rTarget;
+			if (!rTarget.Init(type, dimensions, *m_diCore, m_ResourceRecycler))
+			{
+				return std::nullopt;
+			}
+			return rTarget;
 		}
 
 		uint32_t GetFrameIndex() const { return m_FrameIndex; }
@@ -421,6 +434,7 @@ namespace aZero::Renderer
 		void UnregisterAsset(AssetType& asset);
 
 	private:
+		bool m_HasSignalledFrameComplete = false;
 		RenderAPI::Core* m_diCore = nullptr;
 		Compiler::Compiler* m_diCompiler = nullptr;
 		aZero::Renderer::CommandManager m_CommandManager;

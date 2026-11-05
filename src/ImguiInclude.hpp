@@ -338,9 +338,9 @@ namespace aZero
         // Tabs
         colors[ImGuiCol_Tab] = bg_mid;
         colors[ImGuiCol_TabHovered] = purple_hover;
-        colors[ImGuiCol_TabActive] = purple;
+        /*colors[ImGuiCol_TabActive] = purple;
         colors[ImGuiCol_TabUnfocused] = bg_mid;
-        colors[ImGuiCol_TabUnfocusedActive] = purple_active;
+        colors[ImGuiCol_TabUnfocusedActive] = purple_active;*/
 
         // Sliders / checkmarks
         colors[ImGuiCol_SliderGrab] = purple_hover;

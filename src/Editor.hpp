@@ -35,30 +35,30 @@ namespace aZero::Editor
 
 			m_MainWindow = std::make_unique<RenderWindow>(Window::WindowDesc("aZero Engine", { 0,0,1920,1080 }, { 1,1,0,1 }, SDL_WINDOW_RESIZABLE, {}), m_Engine->GetCore());
 
-			RenderAPI::Image::Desc ctDesc{
-				.Format = VkFormat::VK_FORMAT_R8G8B8A8_SRGB,
-				.Type = VkImageType::VK_IMAGE_TYPE_2D,
-				.Usage = VkImageUsageFlagBits::VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-				.Width = (uint32_t)m_MainWindow->GetClientDimensions()[0],
-				.Height = (uint32_t)m_MainWindow->GetClientDimensions()[1],
-				.Depth = 1,
-				.MipCount = 1,
-				.ArrayLayers = 1
-			};
-			m_ColorTarget.Init(m_Engine->GetCore(), ctDesc);
+			auto cTargetRes = m_Engine->GetRenderer().CreateRenderTarget({
+				(uint32_t)m_MainWindow->GetClientDimensions()[0],
+				(uint32_t)m_MainWindow->GetClientDimensions()[1]
+				},
+				aZero::Renderer::ERenderTargetType::COLOR
+				);
+			if (!cTargetRes.has_value())
+			{
+				throw;
+			}
 
-			RenderAPI::DepthStencilImage::Desc dsvDesc{
-				.Width = (uint32_t)m_MainWindow->GetClientDimensions()[0],
-				.Height = (uint32_t)m_MainWindow->GetClientDimensions()[1]
-			};
-			m_DepthStencilTarget.Init(m_Engine->GetCore(), dsvDesc);
+			m_ColorTarget = std::move(cTargetRes.value());
 
-			aZero::RenderAPI::ImageView::Desc rtvView{
-				.Image = &m_ColorTarget,
-				.Type = VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
-				.ImageAspect = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT,
-			};
-			m_ColorView = aZero::RenderAPI::ImageView(m_Engine->GetCore(), rtvView);
+			auto dsvTargetRes = m_Engine->GetRenderer().CreateRenderTarget({
+				(uint32_t)m_MainWindow->GetClientDimensions()[0],
+				(uint32_t)m_MainWindow->GetClientDimensions()[1]
+				},
+				aZero::Renderer::ERenderTargetType::DEPTH_STENCIL
+			);
+			if (!dsvTargetRes.has_value())
+			{
+				throw;
+			}
+			m_DepthStencilTarget = std::move(dsvTargetRes.value());
 		}
 
 		~Editor()
@@ -86,19 +86,19 @@ namespace aZero::Editor
 
 			Renderer::Renderer::RenderDesc renderDesc{
 				.ColorTarget = &m_ColorTarget,
-				.DepthStencil = &m_DepthStencilTarget,
-				.ColorView = &m_ColorView
+				.DepthStencil = &m_DepthStencilTarget
 			};
 			m_Engine->GetRenderer().Render(renderDesc);
 
-			m_Engine->GetRenderer().PresentSwapchain(m_ColorTarget, m_MainWindow->m_SwapChain);
+			m_Engine->GetRenderer().CopyToSwapchain(m_ColorTarget, m_MainWindow->m_SwapChain);
+
+			m_MainWindow->m_SwapChain.Present();
 		}
 
 	private:
 
-		RenderAPI::Image m_ColorTarget;
-		aZero::RenderAPI::ImageView m_ColorView;
-		RenderAPI::DepthStencilImage m_DepthStencilTarget;
+		Renderer::RenderTarget m_ColorTarget;
+		Renderer::RenderTarget m_DepthStencilTarget;
 		std::unique_ptr<Engine> m_Engine;
 		std::unique_ptr<RenderWindow> m_MainWindow;
 		uint64_t m_FrameIndex = 0;
