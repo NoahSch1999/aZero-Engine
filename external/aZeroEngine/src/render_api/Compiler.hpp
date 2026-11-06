@@ -129,21 +129,27 @@ namespace aZero::Compiler
             std::unordered_map<uint32_t, DescriptorSetReflection> DescriptorSets;
         };
 
+        struct EntryPointDesc
+        {
+            std::string Name;
+            std::vector<std::string> TypeArguments;
+        };
+
         struct VertexDesc
         {
-            std::unordered_set<std::string> EntryPoints;
+            std::vector<EntryPointDesc> EntryPoints;
             std::vector<ShaderModule*> Modules;
         };
 
         struct MeshletDesc
         {
-            std::unordered_set<std::string> EntryPoints;
+            std::vector<EntryPointDesc> EntryPoints;
             std::vector<ShaderModule*> Modules;
         };
 
         struct ComputeDesc
         {
-            std::string EntryPointName;
+            EntryPointDesc EntryPoint;
             std::vector<ShaderModule*> Modules;
         };
 
@@ -196,10 +202,10 @@ namespace aZero::Compiler
                 return false;
             }
 
-            std::vector<slang::IComponentType*> programComponents;
+            std::vector<Slang::ComPtr<slang::IComponentType>> programComponents;
             for (const ShaderModule* module : desc.Modules)
             {
-                programComponents.push_back(module->m_SlangModule);
+                programComponents.emplace_back(static_cast<slang::IComponentType*>(module->m_SlangModule.get()));
             }
 
             this->AddEntryPoints(desc, programComponents);
@@ -223,22 +229,39 @@ namespace aZero::Compiler
         Reflection m_Reflection;
         RenderAPI::Core* m_diCore = nullptr;
 
-        void AddEntryPoints(const MeshletDesc& desc, std::vector<slang::IComponentType*>& programComponents)
+        slang::TypeReflection* FindType(
+            const std::vector<ShaderModule*>& modules,
+            const std::string& typeName)
+        {
+            for (auto* module : modules)
+            {
+                auto* type = module->m_SlangModule
+                    ->getLayout()
+                    ->findTypeByName(typeName.c_str());
+
+                if (type)
+                    return type;
+            }
+
+            return nullptr;
+        }
+
+        void AddEntryPoints(const MeshletDesc& desc, std::vector<Slang::ComPtr<slang::IComponentType>>& programComponents)
         {
             this->FindAddEntryPoints(programComponents, desc.EntryPoints, desc.Modules);
         }
 
-        void AddEntryPoints(const VertexDesc& desc, std::vector<slang::IComponentType*>& programComponents)
+        void AddEntryPoints(const VertexDesc& desc, std::vector<Slang::ComPtr<slang::IComponentType>>& programComponents)
         {
             this->FindAddEntryPoints(programComponents, desc.EntryPoints, desc.Modules);
         }
 
-        void AddEntryPoints(const ComputeDesc& desc, std::vector<slang::IComponentType*>& programComponents)
+        void AddEntryPoints(const ComputeDesc& desc, std::vector<Slang::ComPtr<slang::IComponentType>>& programComponents)
         {
-            this->FindAddEntryPoints(programComponents, { desc.EntryPointName }, desc.Modules);
+            this->FindAddEntryPoints(programComponents, { desc.EntryPoint }, desc.Modules);
         }
 
-        void FindAddEntryPoints(std::vector<slang::IComponentType*>& programComponents, const std::unordered_set<std::string>& entryPoints, const std::vector<ShaderModule*>& modules)
+       /* void FindAddEntryPoints(std::vector<slang::IComponentType*>& programComponents, const std::unordered_set<std::string>& entryPoints, const std::vector<ShaderModule*>& modules)
         {
             for (const auto& module : modules)
             {
@@ -252,15 +275,99 @@ namespace aZero::Compiler
                     }
                 }
             }
+        }*/
+
+        bool FindAddEntryPoints(
+            std::vector<Slang::ComPtr<slang::IComponentType>>& programComponents,
+            const  std::vector<EntryPointDesc>& entryPoints,
+            const std::vector<ShaderModule*>& modules)
+        {
+            Slang::ComPtr<slang::IBlob> diagnostics;
+
+            for (const auto& module : modules)
+            {
+                for (const auto& entryPoint : entryPoints)
+                {
+                    Slang::ComPtr<slang::IEntryPoint> entry;
+
+                    if (SLANG_FAILED(module->m_SlangModule->findEntryPointByName(
+                        entryPoint.Name.c_str(),
+                        entry.writeRef())))
+                    {
+                        continue;
+                    }
+
+                    if (!entry)
+                        continue;
+
+                    // Resolve generic type arguments.
+                    std::vector<slang::SpecializationArg> specializationArgs;
+
+                    for (const auto& typeName : entryPoint.TypeArguments)
+                    {
+                        slang::TypeReflection* type = nullptr;
+
+                        for (const auto* typeModule : modules)
+                        {
+                            type = typeModule->m_SlangModule
+                                ->getLayout()
+                                ->findTypeByName(typeName.c_str());
+
+                            if (type)
+                                break;
+                        }
+
+                        if (!type)
+                        {
+                            std::cerr << "Failed to find specialization type: "
+                                << typeName << '\n';
+                            return false;
+                        }
+
+                        specializationArgs.push_back(
+                            slang::SpecializationArg::fromType(type)
+                        );
+                    }
+
+                    // Specialize the entry point.
+                    Slang::ComPtr<slang::IComponentType> specializedEntry;
+
+                    if (SLANG_FAILED(entry->specialize(
+                        specializationArgs.data(),
+                        static_cast<SlangInt>(specializationArgs.size()),
+                        specializedEntry.writeRef(),
+                        diagnostics.writeRef())))
+                    {
+                        if (diagnostics)
+                        {
+                            std::cerr << static_cast<const char*>(
+                                diagnostics->getBufferPointer()
+                                ) << '\n';
+                        }
+
+                        return false;
+                    }
+
+                    programComponents.push_back(specializedEntry);
+                }
+            }
+
+            return true;
         }
 
-        Slang::ComPtr<slang::IComponentType> BuildProgram(const std::vector<ShaderModule*>& modules, const std::vector<slang::IComponentType*>& programComponents)
+        Slang::ComPtr<slang::IComponentType> BuildProgram(const std::vector<ShaderModule*>& modules, const  std::vector<Slang::ComPtr<slang::IComponentType>>& programComponents)
         {
             Slang::ComPtr<slang::IComponentType> compiledProgram;
             Slang::ComPtr<slang::IBlob> diagnostics;
+            std::vector<slang::IComponentType*> progComps;
+            for (auto& ptr : programComponents)
+            {
+                progComps.push_back(ptr.get());
+            }
+
             if (SLANG_FAILED(modules[0]->m_Session->createCompositeComponentType(
-                programComponents.data(),
-                programComponents.size(),
+                progComps.data(),
+                progComps.size(),
                 compiledProgram.writeRef(),
                 diagnostics.writeRef())))
             {

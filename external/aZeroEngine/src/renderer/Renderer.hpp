@@ -11,7 +11,7 @@
 #include "render_api/RenderPass.hpp"
 #include "RenderTarget.hpp"
 #include "GpuMeshSystem.hpp"
-#include "GpuMaterialSystem.hpp"
+#include "asset/material/MaterialSystem.hpp"
 #include "GpuTextureSystem.hpp"
 
 namespace aZero::Renderer
@@ -53,6 +53,8 @@ namespace aZero::Renderer
 			m_GraphicsQueue.Init(core, RenderAPI::EQueueType::Graphics);
 			m_RenderSemaphore.Init(core, RenderAPI::ESemaphoreType::Timeline);
 
+			m_MaterialSystem = std::make_unique<System::MaterialSystem>(*m_diCore, compiler, m_ResourceRecycler, (uint64_t)(2048 * 2048), frameBufferCount);
+
 			Compiler::CompilerSession::Desc d;
 			d.CompilerOptions = std::vector<slang::CompilerOptionEntry>({
 				{
@@ -72,10 +74,14 @@ namespace aZero::Renderer
 			Compiler::CompilerSession session = compiler.CreateSession(d).value();
 
 			Compiler::ShaderModule testModule = session.LoadModule(std::string(ENGINE_SHADER_DIRECTORY) + "/test.slang").value();
+			Compiler::ShaderModule materialModule = session.LoadModule(std::string(ENGINE_SHADER_DIRECTORY) + "/testMaterial.slang").value();
 
 			Compiler::ShaderProgram::VertexDesc testShaderDesc{
-			   .EntryPoints = {"vsMain", "psMain"},
-			   .Modules = {&testModule}
+			   .EntryPoints = {
+					{ "vsMain"},
+					{ "psMain", {"TestMaterial2"} }
+				},
+			   .Modules = {&testModule, &materialModule}
 			};
 
 			testShader.Build(testShaderDesc);
@@ -236,6 +242,7 @@ namespace aZero::Renderer
 			m_CommandManager.NextFrame(m_FrameIndex);
 			m_ResourceRecycler.NextFrame(m_FrameIndex);
 			m_GpuTextureSystem.NextFrame(m_FrameIndex);
+			m_MaterialSystem->NextFrame(m_FrameIndex);
 
 			m_FrameDataUploader = m_CommandManager.GetBuffer();
 			m_FrameDataUploader.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
@@ -266,6 +273,8 @@ namespace aZero::Renderer
 		void FinalizeFrame()
 		{
 			aZero::Renderer::FrameContext& frameContext = m_FrameContexts[m_FrameIndex];
+
+			m_MaterialSystem->UpdateDirtyMaterials(frameContext.GetFrameAllocator());
 
 			frameContext.GetFrameAllocator().Record(m_FrameDataUploader);
 			m_FrameDataUploader.StopRecording();
@@ -488,7 +497,7 @@ namespace aZero::Renderer
 		RenderAPI::CommandBuffer m_FrameDataUploader;
 		aZero::Renderer::GpuMeshSystem m_GpuMeshSystem;
 		aZero::Renderer::GpuTextureSystem m_GpuTextureSystem;
-		aZero::Renderer::GpuMaterialSystem m_GpuMaterialSystem;
+		std::unique_ptr<aZero::System::MaterialSystem> m_MaterialSystem;
 	};
 }
 
@@ -513,14 +522,12 @@ inline void aZero::Renderer::Renderer::UnregisterAsset<aZero::Asset::Mesh>(aZero
 template<>
 inline void aZero::Renderer::Renderer::RegisterOrUpdateAsset<aZero::Asset::Material>(aZero::Asset::Material& material)
 {
-	FrameContext& frameContext = this->GetCurrentContext();
-	m_GpuMaterialSystem.Update(material, frameContext.GetFrameAllocator());
+
 }
 
 template<>
 inline void aZero::Renderer::Renderer::UnregisterAsset<aZero::Asset::Material>(aZero::Asset::Material& material)
 {
-	m_GpuMaterialSystem.Destroy(material);
 }
 
 template<>

@@ -45,7 +45,7 @@ namespace aZero::Renderer
         {
             m_FrameIndex = frameIndex;
 
-            // ::NextFrame() is called after the renderer has done a cpu-wait on the frame fence for the "frameIndex" frame. This lets us reuse indices of textures that has been destroyed earlier since we know that they aren't in use anymore :)
+            // ::NextFrame() is called after the renderer has done a cpu-wait on the frame fence for the "frameIndex" frame. This lets us reuse indices of textures that has been destroyed last time "frameIndex" happened since we know that they aren't in use anymore :)
             for (const auto& descriptorHandle : m_DeferredDestroyedHandles[m_FrameIndex])
             {
                 m_IndexFreelist.Recycle(descriptorHandle.Index);
@@ -97,7 +97,10 @@ namespace aZero::Renderer
                 .Layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
                 .Index = texture.m_RenderRef.DescriptorIndex
             };
+
             m_DescriptorSet.UpdateDescriptor(descriptorHandle);
+
+            gpuTexture.Descriptor = descriptorHandle;
 
             RenderAPI::Buffer::Desc stagingBufferDesc{
                 .Size = (uint64_t)cachedData.Data.size(),
@@ -139,6 +142,9 @@ namespace aZero::Renderer
                 .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                 .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT |
                                  VK_ACCESS_2_MEMORY_WRITE_BIT,
+
+                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
 
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

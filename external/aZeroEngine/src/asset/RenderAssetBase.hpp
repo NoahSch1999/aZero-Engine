@@ -1,6 +1,6 @@
 #pragma once
 
-namespace aZero::Renderer { class Renderer; class GpuMeshSystem; class GpuTextureSystem; class GpuMaterialSystem; };
+namespace aZero::Renderer { class Renderer; class GpuMeshSystem; class GpuTextureSystem; class MaterialSystem; };
 
 namespace aZero::Asset
 {
@@ -10,7 +10,7 @@ namespace aZero::Asset
 		friend class aZero::Renderer::Renderer;
 		friend class aZero::Renderer::GpuMeshSystem;
 		friend class aZero::Renderer::GpuTextureSystem;
-		friend class aZero::Renderer::GpuMaterialSystem;
+		friend class aZero::Renderer::MaterialSystem;
 	public:
 		RenderAssetBase() = default;
 		RenderAssetBase(Data&& data)
