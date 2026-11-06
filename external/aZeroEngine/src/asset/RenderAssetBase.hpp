@@ -1,6 +1,6 @@
 #pragma once
 
-namespace aZero::Renderer { class Renderer; };
+namespace aZero::Renderer { class Renderer; class GpuMeshSystem; class GpuTextureSystem; class GpuMaterialSystem; };
 
 namespace aZero::Asset
 {
@@ -8,6 +8,9 @@ namespace aZero::Asset
 	class RenderAssetBase
 	{
 		friend class aZero::Renderer::Renderer;
+		friend class aZero::Renderer::GpuMeshSystem;
+		friend class aZero::Renderer::GpuTextureSystem;
+		friend class aZero::Renderer::GpuMaterialSystem;
 	public:
 		RenderAssetBase() = default;
 		RenderAssetBase(Data&& data)
@@ -18,7 +21,7 @@ namespace aZero::Asset
 
 		const RenderRef& GetRenderRef() const { return m_RenderRef; }
 		const Data& GetCachedData() const { return m_CachedData; }
-		RenderRef m_RenderRef;
+		RenderRef m_RenderRef; // todo Make private
 	private:
 	protected:
 		Data m_CachedData;

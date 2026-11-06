@@ -5,7 +5,8 @@ namespace aZero::Asset
 {
 	struct MeshRenderRef
 	{
-		VkDeviceAddress MeshletPtr, VertexPtr, MeshletBoundPtr;
+		VkDeviceAddress VertexPtr = 0, MeshletPtr = 0, MeshletBoundPtr = 0;
+		bool IsValid() const { return VertexPtr != 0; }
 	};
 
 	class Mesh : public RenderAssetBase<MeshRenderRef, MeshletMeshData>

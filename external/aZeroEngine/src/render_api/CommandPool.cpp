@@ -75,7 +75,7 @@ void aZero::RenderAPI::CommandBuffer::Barrier(const std::vector<VkMemoryBarrier2
     vkCmdPipelineBarrier2(m_CommandBuffer, &barrierDependencyInfo);
 }
 
-void aZero::RenderAPI::CommandBuffer::Copy(const BufferToImageCopyDesc& copyDesc, const RenderAPI::Buffer& srcBuffer, const RenderAPI::Image& dstImage)
+void aZero::RenderAPI::CommandBuffer::Copy(const BufferToImageCopyDesc& copyDesc, const RenderAPI::Buffer& srcBuffer, const RenderAPI::Image& dstImage) const
 {
     std::vector<VkBufferImageCopy> copyRegionsTemp{};
     for (uint32_t j = 0; j < copyDesc.MipOffsets.size(); j++) {
@@ -88,7 +88,7 @@ void aZero::RenderAPI::CommandBuffer::Copy(const BufferToImageCopyDesc& copyDesc
     vkCmdCopyBufferToImage(m_CommandBuffer, srcBuffer.Get(), dstImage.Get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(copyRegionsTemp.size()), copyRegionsTemp.data());
 }
 
-void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Buffer& srcBuffer, uint32_t srcOffset, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset, uint32_t size)
+void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Buffer& srcBuffer, uint32_t srcOffset, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset, uint32_t size) const
 {
     VkBufferCopy cpy{
         .srcOffset = srcOffset,
@@ -98,7 +98,17 @@ void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Buffer& srcBuffer, u
     vkCmdCopyBuffer(m_CommandBuffer, srcBuffer.Get(), dstBuffer.Get(), 1, &cpy);
 }
 
-void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Image& srcImage, VkImage dstImage, VkImageLayout dstImageLayout)
+void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Buffer& srcBuffer, const RenderAPI::Buffer& dstBuffer, const std::vector<VkBufferCopy>& copyRegions) const
+{
+    vkCmdCopyBuffer(m_CommandBuffer, srcBuffer.Get(), dstBuffer.Get(), copyRegions.size(), copyRegions.data());
+}
+
+void aZero::RenderAPI::CommandBuffer::Copy(VkBuffer srcBuffer, VkBuffer dstBuffer, const std::vector<VkBufferCopy>& copyRegions) const
+{
+    vkCmdCopyBuffer(m_CommandBuffer, srcBuffer, dstBuffer, copyRegions.size(), copyRegions.data());
+}
+
+void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Image& srcImage, VkImage dstImage, VkImageLayout dstImageLayout) const
 {
     VkImageSubresourceLayers srl{
         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -132,7 +142,7 @@ void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Image& srcImage, VkI
     vkCmdCopyImage2(m_CommandBuffer, &ci);
 }
 
-void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Image& srcImage, const RenderAPI::Image& dstImage)
+void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Image& srcImage, const RenderAPI::Image& dstImage) const
 {
     this->Copy(srcImage, dstImage.Get(), dstImage.GetCurrentLayout());
 }

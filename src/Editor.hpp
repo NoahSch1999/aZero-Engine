@@ -33,7 +33,7 @@ namespace aZero::Editor
 			};
 			m_Engine = std::make_unique<Engine>(engineDesc);
 
-			m_MainWindow = std::make_unique<RenderWindow>(Window::WindowDesc("aZero Engine", { 0,0,1920,1080 }, { 1,1,0,1 }, SDL_WINDOW_RESIZABLE, {}), m_Engine->GetCore());
+			m_MainWindow = std::make_unique<RenderWindow>(Window::WindowDesc("aZero Engine", { 0,0,1920,1080 }, { 1,1,0,1 }, SDL_WINDOW_RESIZABLE, {}), m_Engine->GetCore(), m_Engine->GetRenderer());
 
 			auto cTargetRes = m_Engine->GetRenderer().CreateRenderTarget({
 				(uint32_t)m_MainWindow->GetClientDimensions()[0],
@@ -76,13 +76,18 @@ namespace aZero::Editor
 
 		void Update()
 		{
-			m_MainWindow->HandleEvents();
-
 			while (!m_Engine->GetRenderer().NextFrame(UINT64_MAX))
 			{
 				// do work while waiting
 			}
+
+			m_MainWindow->HandleEvents();
+
 			m_MainWindow->m_SwapChain.NextFrame(m_Engine->GetRenderer().GetFrameIndex());
+
+			// do frame stuff
+
+			m_Engine->GetRenderer().FinalizeFrame();
 
 			Renderer::Renderer::RenderDesc renderDesc{
 				.ColorTarget = &m_ColorTarget,

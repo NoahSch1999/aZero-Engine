@@ -10,12 +10,17 @@
 #include "render_api/Compiler.hpp"
 #include "render_api/RenderPass.hpp"
 #include "RenderTarget.hpp"
+#include "GpuMeshSystem.hpp"
+#include "GpuMaterialSystem.hpp"
+#include "GpuTextureSystem.hpp"
 
 namespace aZero::Renderer
 {
 	class Renderer
 	{
+		aZero::Renderer::ResourceRecycler m_ResourceRecycler;
 	public:
+
 		Renderer() = default;
 		~Renderer()
 		{
@@ -27,7 +32,7 @@ namespace aZero::Renderer
 		RenderAPI::Buffer testVB;
 
 		Renderer(RenderAPI::Core& core, Compiler::Compiler& compiler, uint32_t frameBufferCount)
-			:m_diCore(&core), m_diCompiler(&compiler)
+			:m_diCore(&core), m_diCompiler(&compiler), m_GpuTextureSystem(core, frameBufferCount)
 		{
 			m_FrameIndex = 0;
 
@@ -39,15 +44,14 @@ namespace aZero::Renderer
 			};
 			m_CommandManager = aZero::Renderer::CommandManager(core, cmdManagerDesc, m_FrameIndex);
 
+			m_ResourceRecycler = aZero::Renderer::ResourceRecycler(*m_diCore, frameBufferCount, m_FrameIndex);
 			for (uint32_t i = 0; i < frameBufferCount; i++)
 			{
-				m_FrameContexts.emplace_back(core);
+				m_FrameContexts.emplace_back(core, m_ResourceRecycler);
 			}
 
 			m_GraphicsQueue.Init(core, RenderAPI::EQueueType::Graphics);
 			m_RenderSemaphore.Init(core, RenderAPI::ESemaphoreType::Timeline);
-
-			m_ResourceRecycler = aZero::Renderer::ResourceRecycler(*m_diCore, frameBufferCount, m_FrameIndex);
 
 			Compiler::CompilerSession::Desc d;
 			d.CompilerOptions = std::vector<slang::CompilerOptionEntry>({
@@ -136,7 +140,7 @@ namespace aZero::Renderer
 			std::vector<TempVertex> vertices =
 			{
 				// Position                  // UV
-				TempVertex (- 1.0f, -1.0f, 0.0f,0.0f, 1.0f),
+				TempVertex (- 1.0f, -0.0f, 0.0f,0.0f, 1.0f),
 				TempVertex(1.0f, -1.0f, 0.0f,      1.0f, 1.0f),
 				TempVertex( 1.0f,  1.0f, 0.0f,      1.0f, 0.0f),
 				TempVertex ( - 1.0f,  1.0f, 0.0f, 0.0f, 0.0f)
@@ -177,6 +181,8 @@ namespace aZero::Renderer
 			};
 			m_GraphicsQueue.SubmitCommandBuffers(submitDesc);
 
+			vbDesc.UsageBits = VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+			test = RenderAPI::Buffer(core, vbDesc);
 			/*m_diCore->FlushGPU();
 
 			cb.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
@@ -229,6 +235,10 @@ namespace aZero::Renderer
 
 			m_CommandManager.NextFrame(m_FrameIndex);
 			m_ResourceRecycler.NextFrame(m_FrameIndex);
+			m_GpuTextureSystem.NextFrame(m_FrameIndex);
+
+			m_FrameDataUploader = m_CommandManager.GetBuffer();
+			m_FrameDataUploader.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
 			return true;
 		}
@@ -239,9 +249,38 @@ namespace aZero::Renderer
 			aZero::Renderer::RenderTarget* DepthStencil;
 		};
 
-		void Render(const RenderDesc& desc)
+		RenderAPI::Buffer test;
+		void Test(float value, float value2, float value3)
 		{
 			aZero::Renderer::FrameContext& frameContext = m_FrameContexts[m_FrameIndex];
+			float data = value;
+			frameContext.GetFrameAllocator().Allocate(&data, sizeof(data), test, sizeof(data) * 1);
+
+			data = value2;
+			frameContext.GetFrameAllocator().Allocate(&data, sizeof(data), test, sizeof(data) * 2);
+
+			data = value3;
+			frameContext.GetFrameAllocator().Allocate(&data, sizeof(data), test, sizeof(data) * 100);
+		}
+
+		void FinalizeFrame()
+		{
+			aZero::Renderer::FrameContext& frameContext = m_FrameContexts[m_FrameIndex];
+
+			frameContext.GetFrameAllocator().Record(m_FrameDataUploader);
+			m_FrameDataUploader.StopRecording();
+
+			aZero::RenderAPI::CommandQueue::SubmitDesc submitDesc{
+			   .CommandBuffers = {&m_FrameDataUploader},
+			   .WaitOnSemaphores = {}, // No need to wait on the m_RenderSemaphore since barriers will guarantee sync if we use them correctly...
+			   .SignalSemaphores = {{.SemaphorePtr = &m_RenderSemaphore, .Stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}}
+			};
+			
+			m_GraphicsQueue.SubmitCommandBuffers(submitDesc);
+		}
+
+		void Render(const RenderDesc& desc)
+		{
 			RenderAPI::CommandBuffer cb = m_CommandManager.GetBuffer();
 			cb.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
@@ -251,7 +290,7 @@ namespace aZero::Renderer
 			{
 				RenderAPI::Image::TransitionDesc srcDesc {
 				.DstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				.DstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+				.DstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
 				.NewLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				.SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
 				};
@@ -277,6 +316,9 @@ namespace aZero::Renderer
 				auto b2 = pass.GetPushConstantBinding("Constants", "VP");
 				glm::mat4x4 vp; //
 				cbuff.SetPushConstants(b2, vp);
+
+				auto b3 = pass.GetPushConstantBinding("Constants", "BDA");
+				cbuff.SetPushConstants(b3, test.GetDeviceAddress().value());
 
 				VkViewport viewport{
 					   .x = 0.f,
@@ -339,8 +381,8 @@ namespace aZero::Renderer
 			cb.StopRecording();
 
 			aZero::RenderAPI::CommandQueue::SubmitDesc submitDesc{
-			   .CommandBuffers = {&cb },
-			   .WaitOnSemaphores = {{.SemaphorePtr = &m_RenderSemaphore, .Stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}},
+			   .CommandBuffers = { &cb },
+			   .WaitOnSemaphores = {}, // No need to wait on the m_RenderSemaphore since barriers will guarantee sync if we use them correctly...
 			   .SignalSemaphores = {{.SemaphorePtr = &m_RenderSemaphore, .Stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}}
 			};
 			m_GraphicsQueue.SubmitCommandBuffers(submitDesc);
@@ -391,7 +433,7 @@ namespace aZero::Renderer
 
 			srcDesc = {
 				.DstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				.DstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+				.DstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
 				.NewLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				.SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
 			};
@@ -442,7 +484,11 @@ namespace aZero::Renderer
 		RenderAPI::CommandQueue m_GraphicsQueue;
 		uint32_t m_FrameIndex;
 		RenderAPI::Semaphore m_RenderSemaphore;
-		aZero::Renderer::ResourceRecycler m_ResourceRecycler;
+
+		RenderAPI::CommandBuffer m_FrameDataUploader;
+		aZero::Renderer::GpuMeshSystem m_GpuMeshSystem;
+		aZero::Renderer::GpuTextureSystem m_GpuTextureSystem;
+		aZero::Renderer::GpuMaterialSystem m_GpuMaterialSystem;
 	};
 }
 
@@ -455,63 +501,36 @@ inline void aZero::Renderer::Renderer::UnregisterAsset(AssetType&) {}
 template<>
 inline void aZero::Renderer::Renderer::RegisterOrUpdateAsset<aZero::Asset::Mesh>(aZero::Asset::Mesh& mesh)
 {
-	//if (mesh.GetRenderRef())
-	//{
-	//	// todo Impl update of existing asset
-	//	return;
-	//}
-	FrameContext& context = this->GetCurrentContext();
-	/*const auto [meshletOffset, vertexOffset] = m_RenderAssetManager->UpdateRenderState(context.GetFrameStagingAllocator(),
-		mesh.GetCachedData().m_VertexData.Meshlets, mesh.GetCachedData().m_VertexData.Vertices, mesh.GetCachedData().m_VertexData.MeshletBounds);
-	mesh.m_RenderRef.m_MeshletGlobalOffset = meshletOffset;
-	mesh.m_RenderRef.m_VertexGlobalOffset = vertexOffset;*/
+	m_GpuMeshSystem.Update(mesh, *m_diCore, m_ResourceRecycler, m_FrameDataUploader);
 }
 
 template<>
 inline void aZero::Renderer::Renderer::UnregisterAsset<aZero::Asset::Mesh>(aZero::Asset::Mesh& mesh)
 {
-	//m_RenderAssetManager->RemoveMeshAsset(mesh.GetRenderRef().m_MeshletGlobalOffset);
+	m_GpuMeshSystem.Destroy(mesh);
 }
 
 template<>
 inline void aZero::Renderer::Renderer::RegisterOrUpdateAsset<aZero::Asset::Material>(aZero::Asset::Material& material)
 {
-	FrameContext& context = this->GetCurrentContext();
-
-	if (material.GetAlbedoPtr() && !material.GetAlbedoPtr()->GetRenderRef().IsValid())
-	{
-		// todo Impl handling of textures non-valid textures
-		throw std::invalid_argument("No bound valid albedo texture");
-	}
-
-	// todo Maybe call different overloads based on material properties?
-	//material.m_RenderRef.MaterialIndex = m_RenderAssetManager->UpdateRenderState(context.GetFrameStagingAllocator(), material.m_RenderRef.MaterialIndex, material.GetFormat_PBR_GPU());
+	FrameContext& frameContext = this->GetCurrentContext();
+	m_GpuMaterialSystem.Update(material, frameContext.GetFrameAllocator());
 }
 
 template<>
 inline void aZero::Renderer::Renderer::UnregisterAsset<aZero::Asset::Material>(aZero::Asset::Material& material)
 {
-	//m_RenderAssetManager->RemoveMaterialAsset(material.GetRenderRef().MaterialIndex);
+	m_GpuMaterialSystem.Destroy(material);
 }
 
 template<>
 inline void aZero::Renderer::Renderer::RegisterOrUpdateAsset<aZero::Asset::Texture>(Asset::Texture& texture)
 {
-	if (texture.GetRenderRef().IsValid())
-	{
-		// todo Impl update of existing asset
-		return;
-	}
-	FrameContext& context = this->GetCurrentContext();
-	/*texture.m_RenderRef.DescriptorIndex = m_RenderAssetManager->UpdateRenderState(m_diDevice, context.GetCommandList(), m_ResourceRecycler, m_ResourceHeap, texture.GetCachedData());
-	m_DirectCommandQueue.ExecuteCommandList(context.GetCommandList());*/
+	m_GpuTextureSystem.Update(texture, *m_diCore, m_ResourceRecycler, m_FrameDataUploader);
 }
 
 template<>
 inline void aZero::Renderer::Renderer::UnregisterAsset<aZero::Asset::Texture>(aZero::Asset::Texture& texture)
 {
-	//m_RenderAssetManager->RemoveTextureAsset(texture.GetRenderRef().DescriptorIndex);
-
-	// todo Impl recycle that doesnt force flush of descriptors
-	this->m_diCore->FlushGPU();
+	m_GpuTextureSystem.Destroy(texture);
 }

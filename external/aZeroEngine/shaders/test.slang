@@ -12,6 +12,7 @@ struct PushConstants
     [[vk::offset(0)]]
     float3 Color;
     float4x4 VP;
+    uint64_t BDA;
 };
 
 [[vk::push_constant]]
@@ -34,5 +35,6 @@ VSOutput vsMain(VSInput input) {
 
 [shader("fragment")]
 float4 psMain(VSOutput input) {
-    return float4(Constants.Color, 1.f);
+    float *colorPtr = (float *)Constants.BDA;
+    return float4(colorPtr[1], colorPtr[2], colorPtr[100], 1.f);
 }

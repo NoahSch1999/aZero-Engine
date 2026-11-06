@@ -176,12 +176,14 @@ namespace aZero::RenderAPI
 
         void Barrier(const std::vector<VkMemoryBarrier2>& globalBarriers, const std::vector<VkImageMemoryBarrier2>& imageBarriers, const std::vector<VkBufferMemoryBarrier2>& bufferBarriers) const;
 
-        void Copy(const BufferToImageCopyDesc& copyDesc, const RenderAPI::Buffer& srcBuffer, const RenderAPI::Image& dstImage);
+        void Copy(const BufferToImageCopyDesc& copyDesc, const RenderAPI::Buffer& srcBuffer, const RenderAPI::Image& dstImage) const;
 
-        void Copy(const RenderAPI::Buffer& srcBuffer, uint32_t srcOffset, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset, uint32_t size);
+        void Copy(const RenderAPI::Buffer& srcBuffer, uint32_t srcOffset, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset, uint32_t size) const;
+        void Copy(const RenderAPI::Buffer& srcBuffer, const RenderAPI::Buffer& dstBuffer, const std::vector<VkBufferCopy>& copyRegions) const;
+        void Copy(VkBuffer srcBuffer, VkBuffer dstBuffer, const std::vector<VkBufferCopy>& copyRegions) const;
 
-        void Copy(const RenderAPI::Image& srcImage, VkImage dstImage, VkImageLayout dstImageLayout);
-        void Copy(const RenderAPI::Image& srcImage, const RenderAPI::Image& dstImage);
+        void Copy(const RenderAPI::Image& srcImage, VkImage dstImage, VkImageLayout dstImageLayout) const;
+        void Copy(const RenderAPI::Image& srcImage, const RenderAPI::Image& dstImage) const;
 
         VkCommandBuffer Get() const { return m_CommandBuffer; }
 
