@@ -66,7 +66,23 @@ namespace aZero::Renderer
 			m_Allocations[dstBuffer.Get()].CopyRegions.push_back(copyRegion);
 		}
 
-		void Record(RenderAPI::CommandBuffer& cmdBuffer)
+		template<typename T> requires std::is_trivially_copyable_v<T>
+		void Allocate(const std::vector<T>& data, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset)
+		{
+			const uint32_t size = data.size() * sizeof(T);
+			std::byte* ptr = m_Allocator.Allocate(size);
+			memcpy(ptr, data.data(), size);
+			uint32_t offset = m_Allocator.GetOffset() - size;
+
+			VkBufferCopy copyRegion{
+				.srcOffset = (VkDeviceSize)offset,
+				.dstOffset = (VkDeviceSize)dstOffset,
+				.size = (VkDeviceSize)size
+			};
+			m_Allocations[dstBuffer.Get()].CopyRegions.push_back(copyRegion);
+		}
+
+		void Record(RenderAPI::CommandBuffer& cmdBuffer, bool clear = true)
 		{
 			VkBufferMemoryBarrier2 stagingBufferBarrier = {
 					.sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
@@ -147,6 +163,11 @@ namespace aZero::Renderer
 				};
 
 				cmdBuffer.Barrier({}, {}, { postCopyBarrier });
+			}
+
+			if (clear)
+			{
+				this->ClearAllocations();
 			}
 		}
 

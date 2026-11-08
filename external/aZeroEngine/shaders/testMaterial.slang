@@ -33,7 +33,7 @@ public struct TestMaterial2 : IMaterial
     }
     public float4 CalcDirectionalLights(float4 fragmentInput, uint64_t materialPtr, RasterVertex vertex, DirectionalLight *lights, uint32_t numLights)
     {
-        return float4(1, 1, 0, 1.f);
+        return float4(1, 0, 0, 1.f);
     }
 }
 

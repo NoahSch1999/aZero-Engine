@@ -53,7 +53,7 @@ namespace aZero::Renderer
 			m_GraphicsQueue.Init(core, RenderAPI::EQueueType::Graphics);
 			m_RenderSemaphore.Init(core, RenderAPI::ESemaphoreType::Timeline);
 
-			m_MaterialSystem = std::make_unique<System::MaterialSystem>(*m_diCore, compiler, m_ResourceRecycler, (uint64_t)(2048 * 2048), frameBufferCount);
+			m_MaterialSystem = std::make_unique<System::MaterialSystem>(*m_diCore, compiler, m_ResourceRecycler, (uint64_t)(2048 * 2048), 1000);
 
 			Compiler::CompilerSession::Desc d;
 			d.CompilerOptions = std::vector<slang::CompilerOptionEntry>({
@@ -242,7 +242,7 @@ namespace aZero::Renderer
 			m_CommandManager.NextFrame(m_FrameIndex);
 			m_ResourceRecycler.NextFrame(m_FrameIndex);
 			m_GpuTextureSystem.NextFrame(m_FrameIndex);
-			m_MaterialSystem->NextFrame(m_FrameIndex);
+			//m_MaterialSystem->NextFrame(m_FrameIndex);
 
 			m_FrameDataUploader = m_CommandManager.GetBuffer();
 			m_FrameDataUploader.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
@@ -292,6 +292,20 @@ namespace aZero::Renderer
 		{
 			RenderAPI::CommandBuffer cb = m_CommandManager.GetBuffer();
 			cb.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+			//------------------------------
+
+			aZero::Renderer::FrameContext& frameContext = m_FrameContexts[m_FrameIndex];
+			auto countVector = m_MaterialSystem->CreateVectorForMaterialTypeCount();
+			
+			// get scene static count per instance (index with instance.basematerial.runtimetypeid into countVector. also index with the same in the shader into the counts gpu buffer )
+
+			//
+
+			m_MaterialSystem->PrepareUpdateAtomicCounterBuffer(frameContext.GetFrameAllocator(), countVector);
+			frameContext.GetFrameAllocator().Record(cb);
+
+			//------------------------------
 
 			if (
 				desc.ColorTarget->m_Image.GetTransition().newLayout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL

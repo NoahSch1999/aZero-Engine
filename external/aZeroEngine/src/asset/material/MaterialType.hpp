@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <type_traits>
 
+namespace aZero::System { class MaterialSystem; }
+
 namespace aZero::Asset
 {
 	enum class ParameterType {
@@ -92,10 +94,11 @@ namespace aZero::Asset
 			std::size_t TotalSize;
 		};
 
-		std::string m_Name;
+		std::string Name;
 		std::map<std::string, Parameter> Parameters;
 		PropertyFlags Properties;
 		std::filesystem::path MaterialShaderPath;
+		std::string MaterialShaderName;
 
 		const SizeInfo GetParameterSizeInfo() const
 		{
@@ -112,12 +115,11 @@ namespace aZero::Asset
 	};
 
 	using MaterialRuntimeTypeID = uint32_t;
-	using MaterialInstanceRuntimeID = VkDeviceAddress;
-	constexpr MaterialInstanceRuntimeID g_InvalidRuntimeID = std::numeric_limits<MaterialInstanceRuntimeID>::max();
 	struct MaterialInstance;
 
 	class MaterialType
 	{
+		friend class aZero::System::MaterialSystem;
 	public:
 		MaterialType(const MaterialDefinition& definition, MaterialRuntimeTypeID runtimeTypeID)
 			:m_Definition(definition), m_ParameterSizeInfo(definition.GetParameterSizeInfo()), m_RuntimeTypeID(runtimeTypeID)

@@ -1,17 +1,17 @@
 #pragma once
 #include "MaterialType.hpp"
 
-namespace aZero::System{ class MaterialSystem; }
-
 namespace aZero::Asset
 {
+	using MaterialInstanceBDA = VkDeviceAddress;
+	constexpr MaterialInstanceBDA g_InvalidInstanceBDA = std::numeric_limits<MaterialInstanceBDA>::max();
 	class MaterialInstance
 	{
 		friend class aZero::System::MaterialSystem;
 	public:
 		MaterialInstance() = default;
-		MaterialInstance(const MaterialType& diMaterial, const std::string& name, MaterialInstanceRuntimeID runtimeID)
-			:m_Name(name), m_diMaterial(&diMaterial), m_RuntimeID(runtimeID)
+		MaterialInstance(const MaterialType& diMaterial, const std::string& name, MaterialInstanceBDA instanceBDA)
+			:m_Name(name), m_diMaterial(&diMaterial), m_InstanceBDA(instanceBDA)
 		{
 			m_Data.resize(diMaterial.GetParameterSizeInfo().TotalSize);
 		}
@@ -77,7 +77,7 @@ namespace aZero::Asset
 	private:
 		const MaterialType* m_diMaterial = nullptr;
 		std::vector<std::byte> m_Data;
-		MaterialInstanceRuntimeID m_RuntimeID = g_InvalidRuntimeID;
+		MaterialInstanceBDA m_InstanceBDA = g_InvalidInstanceBDA;
 		std::string m_Name;
 		bool m_IsDirty = true;
 	};
