@@ -194,6 +194,7 @@ file(GLOB ENGINE_HEADERS
 
 add_library(${PROJECT_NAME}
     "src/Engine.cpp"
+    "src/misc/STBIHack.cpp"
     "src/physics/PhysicsEngine.cpp"
     "src/physics/PhysicsWorld.cpp"
     "src/render_api/CommandPool.cpp"

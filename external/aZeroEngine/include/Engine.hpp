@@ -6,17 +6,10 @@
 #include "renderer/Renderer.hpp"
 #include "misc/NonMoveCopy.hpp"
 
-#include "asset/gltf.hpp"
-#include "asset/AssetManager.hpp"
+#include "asset/loading_saving/gltf.hpp"
 
 namespace aZero
 {
-	namespace Asset
-	{
-		template<typename T>
-		using AssetManager = aZero::Asset::AssetManagerT<T, aZero::Asset::Mesh, aZero::Asset::Material, aZero::Asset::Texture>;
-	}
-
 	class Engine : public NonCopyable
 	{
 	public:
@@ -39,8 +32,11 @@ namespace aZero
 		std::string GetProjectRootDirectory() { return m_ProjectRootDirectory; }
 		Audio::AudioEngine& GetAudioEngine() const { return *m_AudioEngine.get(); }
 		Physics::PhysicsEngine& GetPhysicsEngine() const { return *m_PhysicsEngine.get(); }
+
 		Renderer::Renderer& GetRenderer() const { return *m_Renderer.get(); }
-		Asset::AssetManager<std::string>& GetAssetManager() const { return *m_AssetManager.get(); }
+		System::MeshSystem& GetMeshSystem() const { return *m_Renderer->m_MeshSystem.get(); }
+		System::TextureSystem&	GetTextureSystem() const { return *m_Renderer->m_TextureSystem.get(); }
+		System::MaterialSystem& GetMaterialSystem() const { return *m_Renderer->m_MaterialSystem.get(); }
 
 	private:
 		std::unique_ptr<RenderAPI::Core> m_Core;
@@ -49,6 +45,8 @@ namespace aZero
 		std::unique_ptr<Audio::AudioEngine> m_AudioEngine;
 		std::unique_ptr<Physics::PhysicsEngine> m_PhysicsEngine;
 		std::unique_ptr<Renderer::Renderer> m_Renderer;
-		std::unique_ptr<Asset::AssetManager<std::string>> m_AssetManager;
+		System::MeshSystem m_MeshSystem;
+		System::TextureSystem m_TextureSystem;
+		System::MaterialSystem m_MaterialSystem;
 	};
 }

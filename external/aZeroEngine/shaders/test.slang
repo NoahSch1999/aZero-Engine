@@ -7,9 +7,6 @@ struct VSInput {
     float2 UV;
 };
 
-[[vk::binding(0, 0)]]
-Sampler2D textures[];
-
 struct PushConstants
 {
     [[vk::offset(0)]]

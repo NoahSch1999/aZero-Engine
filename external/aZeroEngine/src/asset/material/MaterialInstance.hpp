@@ -17,7 +17,7 @@ namespace aZero::Asset
 		}
 
 		template<typename T> requires std::is_trivially_copyable_v<T>
-		void SetParameter(const std::string& name, const T& data)
+		void SetParameter(const std::string& name, const T& data, bool markDirty = true)
 		{
 			if (!m_diMaterial)
 			{
@@ -32,7 +32,7 @@ namespace aZero::Asset
 					if (auto iter2 = m_diMaterial->GetParameterSizeInfo().Offsets.find(name); iter2 != m_diMaterial->GetParameterSizeInfo().Offsets.end())
 					{
 						memcpy(m_Data.data() + iter2->second, &data, sizeof(data));
-						m_IsDirty = true;
+						m_IsDirty = markDirty;
 					}
 				}
 			}
@@ -74,6 +74,7 @@ namespace aZero::Asset
 
 		void SetNotDirty() { m_IsDirty = false; }
 		bool IsDirty() const { return m_IsDirty; }
+		MaterialInstanceBDA GetBDA() const { return m_InstanceBDA; }
 	private:
 		const MaterialType* m_diMaterial = nullptr;
 		std::vector<std::byte> m_Data;

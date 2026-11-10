@@ -70,6 +70,12 @@ namespace aZero::Renderer
 		void Allocate(const std::vector<T>& data, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset)
 		{
 			const uint32_t size = data.size() * sizeof(T);
+			if (size == 0)
+			{
+				// Copying 0 bytes is not valid by vk-spec unless we use VK_WHOLE_SIZE.
+				// "The Vulkan spec states (VkBufferCopy): If size is not equal to VK_WHOLE_SIZE, size must be greater than 0".
+				return;
+			}
 			std::byte* ptr = m_Allocator.Allocate(size);
 			memcpy(ptr, data.data(), size);
 			uint32_t offset = m_Allocator.GetOffset() - size;

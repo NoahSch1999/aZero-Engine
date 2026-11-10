@@ -5,7 +5,7 @@
 
 #include "misc/IO_Helper.hpp"
 #include "misc/UUID.hpp"
-#include "misc/AssetData.hpp"
+#include "asset/AssetData.hpp"
 
 namespace aZero::Package
 {

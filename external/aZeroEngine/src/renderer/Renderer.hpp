@@ -3,36 +3,35 @@
 #include "render_api/SwapChain.hpp"
 #include "render_api/CommandQueue.hpp"
 #include "CommandManager.hpp"
-#include "asset/Material.hpp"
-#include "asset/Texture.hpp"
-#include "asset/Mesh.hpp"
 #include "ResourceRecycler.hpp"
 #include "render_api/Compiler.hpp"
 #include "render_api/RenderPass.hpp"
 #include "RenderTarget.hpp"
-#include "GpuMeshSystem.hpp"
-#include "asset/material/MaterialSystem.hpp"
-#include "GpuTextureSystem.hpp"
+#include "system/MeshSystem.hpp"
+#include "system/MaterialSystem.hpp"
+#include "system/TextureSystem.hpp"
 
+namespace aZero { class Engine; }
 namespace aZero::Renderer
 {
 	class Renderer
 	{
-		aZero::Renderer::ResourceRecycler m_ResourceRecycler;
+		friend class aZero::Engine;
 	public:
 
 		Renderer() = default;
 		~Renderer()
 		{
-			m_diCore->FlushGPU();
+			this->FlushRenderingCommands();
 		}
 
 		Compiler::ShaderProgram testShader;
 		Pipeline::RenderPass testRenderPass;
 		RenderAPI::Buffer testVB;
+		VkDeviceAddress testMaterialPtr;
 
 		Renderer(RenderAPI::Core& core, Compiler::Compiler& compiler, uint32_t frameBufferCount)
-			:m_diCore(&core), m_diCompiler(&compiler), m_GpuTextureSystem(core, frameBufferCount)
+			:m_diCore(&core), m_diCompiler(&compiler)
 		{
 			m_FrameIndex = 0;
 
@@ -44,16 +43,18 @@ namespace aZero::Renderer
 			};
 			m_CommandManager = aZero::Renderer::CommandManager(core, cmdManagerDesc, m_FrameIndex);
 
-			m_ResourceRecycler = aZero::Renderer::ResourceRecycler(*m_diCore, frameBufferCount, m_FrameIndex);
+			m_ResourceRecycler = std::make_unique<aZero::Renderer::ResourceRecycler>(*m_diCore, frameBufferCount, m_FrameIndex);
 			for (uint32_t i = 0; i < frameBufferCount; i++)
 			{
-				m_FrameContexts.emplace_back(core, m_ResourceRecycler);
+				m_FrameContexts.emplace_back(core, *m_ResourceRecycler);
 			}
 
 			m_GraphicsQueue.Init(core, RenderAPI::EQueueType::Graphics);
 			m_RenderSemaphore.Init(core, RenderAPI::ESemaphoreType::Timeline);
 
-			m_MaterialSystem = std::make_unique<System::MaterialSystem>(*m_diCore, compiler, m_ResourceRecycler, (uint64_t)(2048 * 2048), 1000);
+			m_MeshSystem = std::make_unique<System::MeshSystem>(*m_diCore, *m_ResourceRecycler);
+			m_TextureSystem = std::make_unique<System::TextureSystem>(*m_diCore, *m_ResourceRecycler, frameBufferCount);
+			m_MaterialSystem = std::make_unique<System::MaterialSystem>(*m_diCore, compiler, *m_ResourceRecycler, (uint64_t)(2048 * 2048), 1000);
 
 			Compiler::CompilerSession::Desc d;
 			d.CompilerOptions = std::vector<slang::CompilerOptionEntry>({
@@ -88,7 +89,6 @@ namespace aZero::Renderer
 
 			Pipeline::RenderPass::VertexPassDesc vPassDesc{};
 			vPassDesc.Program = &testShader;
-
 			
 			//vPassDesc.DepthDesc = Pipeline::RenderPass::Desc::DepthStencil();
 			vPassDesc.RasterDesc = Pipeline::RenderPass::Desc::Rasterizer();
@@ -128,7 +128,7 @@ namespace aZero::Renderer
 				,
 				.MemoryType = RenderAPI::EMemoryType::VRAM,
 				.SeperateHeap = true,
-				.OptResourceRecycler = m_ResourceRecycler
+				.OptResourceRecycler = *m_ResourceRecycler
 			};
 
 			testVB = RenderAPI::Buffer(core, vbDesc);
@@ -139,7 +139,7 @@ namespace aZero::Renderer
 				VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 				.MemoryType = RenderAPI::EMemoryType::SYSRAM,
 				.SeperateHeap = false,
-				.OptResourceRecycler = m_ResourceRecycler
+				.OptResourceRecycler = *m_ResourceRecycler
 			};
 			RenderAPI::Buffer stagingBuffer(core, stagingBufferDesc);
 			
@@ -214,6 +214,10 @@ namespace aZero::Renderer
 			{
 				std::cout << idk.Pos.x << ", " << idk.Pos.y << ", " << idk.Pos.z << "\n";
 			}*/
+
+			this->FlushRenderingCommands(); // Ensures that all init stuff is ready for the cpu to consume
+
+			this->NextFrame();
 		}
 
 		bool NextFrame(uint64_t waitTimeout = UINT64_MAX)
@@ -240,12 +244,13 @@ namespace aZero::Renderer
 			m_HasSignalledFrameComplete = false; // We also reset this to false for the next ::NextFrame() call...
 
 			m_CommandManager.NextFrame(m_FrameIndex);
-			m_ResourceRecycler.NextFrame(m_FrameIndex);
-			m_GpuTextureSystem.NextFrame(m_FrameIndex);
-			//m_MaterialSystem->NextFrame(m_FrameIndex);
+			m_ResourceRecycler->NextFrame(m_FrameIndex);
 
 			m_FrameDataUploader = m_CommandManager.GetBuffer();
 			m_FrameDataUploader.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+			m_MeshSystem->NextFrame(m_FrameDataUploader);
+			m_TextureSystem->NextFrame(m_FrameIndex, m_FrameDataUploader);
 
 			return true;
 		}
@@ -274,6 +279,7 @@ namespace aZero::Renderer
 		{
 			aZero::Renderer::FrameContext& frameContext = m_FrameContexts[m_FrameIndex];
 
+			m_TextureSystem->UpdateDirtyTextures();
 			m_MaterialSystem->UpdateDirtyMaterials(frameContext.GetFrameAllocator());
 
 			frameContext.GetFrameAllocator().Record(m_FrameDataUploader);
@@ -332,6 +338,7 @@ namespace aZero::Renderer
 			//renderDesc.DescriptorSets
 			renderDesc.RenderHeight = desc.ColorTarget->m_Image.GetDesc().Height;
 			renderDesc.RenderWidth = desc.ColorTarget->m_Image.GetDesc().Width;
+			renderDesc.DescriptorSets.push_back(&m_TextureSystem->m_DescriptorSet);
 			renderDesc.Callback = [&](RenderAPI::CommandBuffer& cbuff, aZero::Pipeline::RenderPass& pass) {
 				auto b1 = pass.GetPushConstantBinding("Constants", "Color");
 				cbuff.SetPushConstants(b1, glm::vec3(1, 0, 1));
@@ -340,8 +347,8 @@ namespace aZero::Renderer
 				glm::mat4x4 vp; //
 				cbuff.SetPushConstants(b2, vp);
 
-				auto b3 = pass.GetPushConstantBinding("Constants", "BDA");
-				cbuff.SetPushConstants(b3, test.GetDeviceAddress().value());
+				auto b3 = pass.GetPushConstantBinding("Constants", "MaterialPtr");
+				cbuff.SetPushConstants(b3, testMaterialPtr);
 
 				VkViewport viewport{
 					   .x = 0.f,
@@ -479,7 +486,7 @@ namespace aZero::Renderer
 		std::optional<RenderTarget> CreateRenderTarget(const glm::uvec2& dimensions, ERenderTargetType type)
 		{
 			aZero::Renderer::RenderTarget rTarget;
-			if (!rTarget.Init(type, dimensions, *m_diCore, m_ResourceRecycler))
+			if (!rTarget.Init(type, dimensions, *m_diCore, *m_ResourceRecycler))
 			{
 				return std::nullopt;
 			}
@@ -489,14 +496,7 @@ namespace aZero::Renderer
 		uint32_t GetFrameIndex() const { return m_FrameIndex; }
 		FrameContext& GetCurrentContext() { return m_FrameContexts.at(m_FrameIndex); }
 		uint32_t GetFramesInFlight() const { return m_FrameContexts.size(); }
-
-		// This is specialized to define custom register-behavior on a per-asset level
-		template<typename AssetType>
-		void RegisterOrUpdateAsset(AssetType& asset);
-
-		// This is specialized to define custom unregister-behavior on a per-asset level
-		template<typename AssetType>
-		void UnregisterAsset(AssetType& asset);
+		void FlushRenderingCommands() const { m_diCore->FlushGPU(); }
 
 	private:
 		bool m_HasSignalledFrameComplete = false;
@@ -507,51 +507,11 @@ namespace aZero::Renderer
 		RenderAPI::CommandQueue m_GraphicsQueue;
 		uint32_t m_FrameIndex;
 		RenderAPI::Semaphore m_RenderSemaphore;
+		std::unique_ptr<aZero::Renderer::ResourceRecycler> m_ResourceRecycler;
 
 		RenderAPI::CommandBuffer m_FrameDataUploader;
-		aZero::Renderer::GpuMeshSystem m_GpuMeshSystem;
-		aZero::Renderer::GpuTextureSystem m_GpuTextureSystem;
+		std::unique_ptr<aZero::System::MeshSystem> m_MeshSystem;
+		std::unique_ptr<aZero::System::TextureSystem> m_TextureSystem;
 		std::unique_ptr<aZero::System::MaterialSystem> m_MaterialSystem;
 	};
-}
-
-template<typename AssetType>
-inline void aZero::Renderer::Renderer::RegisterOrUpdateAsset(AssetType&) {}
-
-template<typename AssetType>
-inline void aZero::Renderer::Renderer::UnregisterAsset(AssetType&) {}
-
-template<>
-inline void aZero::Renderer::Renderer::RegisterOrUpdateAsset<aZero::Asset::Mesh>(aZero::Asset::Mesh& mesh)
-{
-	m_GpuMeshSystem.Update(mesh, *m_diCore, m_ResourceRecycler, m_FrameDataUploader);
-}
-
-template<>
-inline void aZero::Renderer::Renderer::UnregisterAsset<aZero::Asset::Mesh>(aZero::Asset::Mesh& mesh)
-{
-	m_GpuMeshSystem.Destroy(mesh);
-}
-
-template<>
-inline void aZero::Renderer::Renderer::RegisterOrUpdateAsset<aZero::Asset::Material>(aZero::Asset::Material& material)
-{
-
-}
-
-template<>
-inline void aZero::Renderer::Renderer::UnregisterAsset<aZero::Asset::Material>(aZero::Asset::Material& material)
-{
-}
-
-template<>
-inline void aZero::Renderer::Renderer::RegisterOrUpdateAsset<aZero::Asset::Texture>(Asset::Texture& texture)
-{
-	m_GpuTextureSystem.Update(texture, *m_diCore, m_ResourceRecycler, m_FrameDataUploader);
-}
-
-template<>
-inline void aZero::Renderer::Renderer::UnregisterAsset<aZero::Asset::Texture>(aZero::Asset::Texture& texture)
-{
-	m_GpuTextureSystem.Destroy(texture);
 }

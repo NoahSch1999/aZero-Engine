@@ -32,10 +32,9 @@ namespace aZero::System
 		using MaterialIndirectCounter = uint32_t;
 
 		MaterialSystem() = default;
-		MaterialSystem(RenderAPI::Core& core, Compiler::Compiler& diCompiler, Renderer::ResourceRecycler& recycler, uint64_t bufferSize/*, uint32_t framesInFlight*/, uint32_t maxInitialMaterials)
+		MaterialSystem(RenderAPI::Core& core, Compiler::Compiler& diCompiler, Renderer::ResourceRecycler& recycler, uint64_t bufferSize, uint32_t maxInitialMaterials)
 			:m_diCore(&core), m_diCompiler(&diCompiler), m_Allocator(aZero::FreelistAllocator(bufferSize))
 		{
-			//m_DeferredAllocationHandler.resize(framesInFlight);
 			{
 				const RenderAPI::Buffer::Desc desc{
 					.Size = bufferSize,
@@ -90,25 +89,25 @@ namespace aZero::System
 			m_FragmentShader = m_Session.LoadModule(std::string(ENGINE_SHADER_DIRECTORY) + "/core_shaders/Geo_FragmentShader.slang").value();
 		}
 
-		std::optional<std::reference_wrapper<Asset::MaterialType>> CreateMaterial(const Asset::MaterialDefinition& definition)
+		std::optional<std::reference_wrapper<Asset::MaterialType>> CreateMaterial(const std::string& name, const Asset::MaterialDefinition& definition)
 		{
+			if (m_Materials.contains(name) || !definition.IsValid())
+			{
+				return std::nullopt;
+			}
+
 			Asset::MaterialRuntimeTypeID newMaterialTypeIndex = m_MaterialTypeIndexList.New();
 			MaterialAllocationInfo info{
 				.MaterialBase = Asset::MaterialType(definition, newMaterialTypeIndex)
 			};
-			// Copy the name since we might remove it with DestroyMaterial which makes "definition" dangling
-			const std::string name = info.MaterialBase.GetDefinition().Name;
+
+			info.MaterialBase.Name = name;
 
 			Pipeline::RenderPass pass(*m_diCore);
 			if (!this->CreatePipeline(info, pass))
 			{
 				m_MaterialTypeIndexList.Recycle(newMaterialTypeIndex);
 				return std::nullopt;
-			}
-
-			if (auto iter = m_Materials.find(name); iter != m_Materials.end())
-			{
-				this->DestroyMaterial(iter->second.MaterialBase);
 			}
 
 			if (m_Passes.size() <= newMaterialTypeIndex)
@@ -124,6 +123,7 @@ namespace aZero::System
 			return it->second.MaterialBase;
 		}
 
+		// todo Support initiation values
 		std::optional<std::reference_wrapper<Asset::MaterialInstance>> CreateMaterialInstance(const std::string& name, const Asset::MaterialType& material)
 		{
 			if (m_MaterialInstances.contains(name))
@@ -150,7 +150,7 @@ namespace aZero::System
 
 		void DestroyMaterial(const Asset::MaterialType& material)
 		{
-			if (auto iter = m_Materials.find(material.GetDefinition().Name); iter != m_Materials.end())
+			if (auto iter = m_Materials.find(material.Name); iter != m_Materials.end())
 			{
 				if (iter->second.MaterialBase.GetRuntimeTypeID() == material.GetRuntimeTypeID())
 				{
@@ -160,7 +160,9 @@ namespace aZero::System
 							//m_DeferredAllocationHandler[m_FrameIndex].push_back(kv.second.Allocation);
 							m_Allocator.Free(kv.second.Allocation);
 							kv.second.Instance.m_InstanceBDA = Asset::g_InvalidInstanceBDA;
+
 							// todo Handle references to the instance
+
 							return true;
 						}
 						return false;
@@ -204,6 +206,8 @@ namespace aZero::System
 			return std::nullopt;
 		}
 
+		
+	private:
 		const RenderAPI::Buffer& GetMaterialInstanceBuffer() const { return m_MaterialInstanceBuffer; }
 		const RenderAPI::Buffer& GetMaterialInstanceCounterBuffer() const { return m_MaterialInstanceCounterBuffer; }
 
@@ -242,44 +246,43 @@ namespace aZero::System
 						.DescriptorSets= texture set,*/
 						.Callback = [&](RenderAPI::CommandBuffer& commandBuffer, aZero::Pipeline::RenderPass& pass) {
 
-							// todo For each camera in the list of cameras with the same targets
-							/*VkViewport vp{
-								.x = 0.f,
-								.y = 0.f,
-								.width = static_cast<float>(window.GetClientDimensions()[0]),
-								.height = static_cast<float>(window.GetClientDimensions()[1]),
-								.minDepth = 0.0f,
-								.maxDepth = 1.0f
-							};
-							VkRect2D scissor{.extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
-							cb.SetScizzorRectsAndViewports({ vp }, { scissor });*/
+						// todo For each camera in the list of cameras with the same targets
+						/*VkViewport vp{
+							.x = 0.f,
+							.y = 0.f,
+							.width = static_cast<float>(window.GetClientDimensions()[0]),
+							.height = static_cast<float>(window.GetClientDimensions()[1]),
+							.minDepth = 0.0f,
+							.maxDepth = 1.0f
+						};
+						VkRect2D scissor{.extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
+						cb.SetScizzorRectsAndViewports({ vp }, { scissor });*/
 
-							/*aZero::Rendering::GeoDrawPushConstants constants{
-								 .CameraBufferPtr = vars.cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(aZero::Rendering::CameraData),
-								 .MeshletBoundBufferPtr = vars.meshletBoundsBuffer.GetDeviceAddress().value(),
-								 .MaterialBufferPtr = vars.materialBuffer.GetDeviceAddress().value(),
-								 .InstanceDataBufferPtr = vars.instanceDataBuffer.GetDeviceAddress().value(),
-								 .DrawMetadataBufferPtr = vars.drawMetadataBuffer.GetDeviceAddress().value(),
-								 .RenderMode = 0u
-							};
-							cb.SetPushConstants(pass.GetPushConstantBlock("Constants"), constants);*/
+						/*aZero::Rendering::GeoDrawPushConstants constants{
+							 .CameraBufferPtr = vars.cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(aZero::Rendering::CameraData),
+							 .MeshletBoundBufferPtr = vars.meshletBoundsBuffer.GetDeviceAddress().value(),
+							 .MaterialBufferPtr = vars.materialBuffer.GetDeviceAddress().value(),
+							 .InstanceDataBufferPtr = vars.instanceDataBuffer.GetDeviceAddress().value(),
+							 .DrawMetadataBufferPtr = vars.drawMetadataBuffer.GetDeviceAddress().value(),
+							 .RenderMode = 0u
+						};
+						cb.SetPushConstants(pass.GetPushConstantBlock("Constants"), constants);*/
 
-							RenderAPI::CommandBuffer::ExecuteIndirectDesc exeDesc{
-								//.IndirectArgumentBuffer = &vars.iaBuffer,
-								//.IndirectArgumentBufferOffset = (uint32_t)(sizeof(aZero::Rendering::IndirectArgumentCounter)), // Starts after count
-								//.IndirectArgumentStride = (uint32_t)(sizeof(uint32_t) * 3),
-								.CountBuffer = &m_MaterialInstanceCounterBuffer,
-								.CountBufferOffset = (uint32_t)(sizeof(MaterialIndirectCounter) * i),
-								//.MaxDraws = 2
-							};
-							commandBuffer.ExecuteIndirectMeshTasksCount(exeDesc);
-						}
+						RenderAPI::CommandBuffer::ExecuteIndirectDesc exeDesc{
+							//.IndirectArgumentBuffer = &vars.iaBuffer,
+							//.IndirectArgumentBufferOffset = (uint32_t)(sizeof(aZero::Rendering::IndirectArgumentCounter)), // Starts after count
+							//.IndirectArgumentStride = (uint32_t)(sizeof(uint32_t) * 3),
+							.CountBuffer = &m_MaterialInstanceCounterBuffer,
+							.CountBufferOffset = (uint32_t)(sizeof(MaterialIndirectCounter) * i),
+							//.MaxDraws = 2
+						};
+						commandBuffer.ExecuteIndirectMeshTasksCount(exeDesc);
+					}
 					}
 				);
 			}
 		}
 
-	private:
 		bool CreatePipeline(MaterialAllocationInfo& allocationInfo, Pipeline::RenderPass& inoutPass)
 		{
 			Compiler::ShaderProgram program;
@@ -293,7 +296,7 @@ namespace aZero::System
 
 			if (!allocationInfo.MaterialBase.GetDefinition().MaterialShaderPath.empty())
 			{
-				optMaterialModule = m_Session.LoadModule(std::string(ENGINE_SHADER_DIRECTORY) + allocationInfo.MaterialBase.GetDefinition().MaterialShaderPath.string());
+				optMaterialModule = m_Session.LoadModule(allocationInfo.MaterialBase.GetDefinition().MaterialShaderPath.string());
 				if (optMaterialModule)
 				{
 					msProgramDesc.Modules.push_back(&optMaterialModule.value());
@@ -320,21 +323,6 @@ namespace aZero::System
 			return true;
 		}
 
-		//void NextFrame(/*uint32_t frameIndex, */Renderer::FrameAllocator& allocator)
-		//{
-		//	m_diFrameAllocator = &allocator;
-		//	/*m_FrameIndex = frameIndex;
-		//	if (frameIndex > m_DeferredAllocationHandler.size())
-		//	{
-		//		throw;
-		//	}
-
-		//	for (const auto& allocation : m_DeferredAllocationHandler[frameIndex])
-		//	{
-		//		m_Allocator.Free(allocation);
-		//	}*/
-		//}
-
 		void UpdateDirtyMaterials(Renderer::FrameAllocator& allocator)
 		{
 			for (auto& [name, materialInstance] : m_MaterialInstances) // Horrible, but good for now...
@@ -355,8 +343,6 @@ namespace aZero::System
 		std::unordered_map<std::string, MaterialAllocationInfo> m_Materials;
 		std::vector<Pipeline::RenderPass> m_Passes;
 		std::unordered_map<std::string, MaterialInstanceAllocationInfo> m_MaterialInstances;
-		//std::vector<std::vector<aZero::FreelistAllocator::Allocation>> m_DeferredAllocationHandler;
-		//Renderer::FrameAllocator* m_diFrameAllocator = nullptr;
 		uint32_t m_FrameIndex;
 		Compiler::Compiler* m_diCompiler = nullptr;
 		Compiler::CompilerSession m_Session;

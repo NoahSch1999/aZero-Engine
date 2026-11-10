@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <type_traits>
+#include <filesystem>
 
 namespace aZero::System { class MaterialSystem; }
 
@@ -60,10 +61,10 @@ namespace aZero::Asset
 			sizeof(std::byte) * 3,
 			sizeof(std::byte) * 4,
 
-			sizeof(uint32_t),
-			sizeof(uint32_t),
-			sizeof(uint32_t),
-			sizeof(uint64_t), // BDA
+			sizeof(RenderAPI::DescriptorIndex),
+			sizeof(RenderAPI::DescriptorIndex),
+			sizeof(RenderAPI::DescriptorIndex),
+			sizeof(VkDeviceAddress)
 		};
 
 		ParameterType Type;
@@ -94,7 +95,6 @@ namespace aZero::Asset
 			std::size_t TotalSize;
 		};
 
-		std::string Name;
 		std::map<std::string, Parameter> Parameters;
 		PropertyFlags Properties;
 		std::filesystem::path MaterialShaderPath;
@@ -112,12 +112,17 @@ namespace aZero::Asset
 			info.TotalSize = offset;
 			return info;
 		}
+
+		bool IsValid() const
+		{
+			return std::filesystem::exists(MaterialShaderPath) && !MaterialShaderName.empty();
+		}
 	};
 
 	using MaterialRuntimeTypeID = uint32_t;
 	struct MaterialInstance;
 
-	class MaterialType
+	class MaterialType : public Asset::AssetBase
 	{
 		friend class aZero::System::MaterialSystem;
 	public:

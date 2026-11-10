@@ -6,6 +6,9 @@ module IMaterial;
 import Lights;
 import RasterVertex;
 
+[[vk::binding(0, 0)]]
+public Sampler2D textures[];
+
 public interface IMaterial
 {
     public float4 CalcPointLights(float4 fragmentInput, uint64_t materialPtr, RasterVertex vertex, PointLight* lights, uint32_t numLights);

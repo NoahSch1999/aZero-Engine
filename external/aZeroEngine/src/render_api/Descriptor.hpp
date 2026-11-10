@@ -5,12 +5,15 @@
 
 namespace aZero::RenderAPI
 {
+    using DescriptorIndex = uint32_t;
+    constexpr DescriptorIndex g_InvalidDescriptorIndex = std::numeric_limits<DescriptorIndex>::max();
+
     struct DescriptorHandle
     {
         RenderAPI::Sampler* Sampler;
         RenderAPI::ImageView* View;
         VkImageLayout Layout;
-        uint32_t Index;
+        DescriptorIndex Index = g_InvalidDescriptorIndex;
     };
 
     class DescriptorSet : public DeleteCopy
@@ -20,6 +23,7 @@ namespace aZero::RenderAPI
         struct Desc
         {
             VkDescriptorType Type;
+            uint32_t MaxDescriptorCount;
             uint32_t DescriptorCount;
             VkShaderStageFlags ShaderStages;
         };
@@ -150,7 +154,7 @@ namespace aZero::RenderAPI
             };
             VkDescriptorSetLayoutBinding descLayoutBindingTex{
                 .descriptorType = desc.Type,
-                .descriptorCount = desc.DescriptorCount,
+                .descriptorCount = desc.MaxDescriptorCount,
                 .stageFlags = desc.ShaderStages/*VK_SHADER_STAGE_FRAGMENT_BIT*/
             };
             VkDescriptorSetLayoutCreateInfo descLayoutTexCI{
@@ -163,7 +167,7 @@ namespace aZero::RenderAPI
             VkDescriptorSetLayout layout;
             chkSucceed(vkCreateDescriptorSetLayout(m_diCore->GetLogicalDevice(), &descLayoutTexCI, nullptr, &layout));
 
-            uint32_t variableDescCount{ descBindingFlags.bindingCount };
+            uint32_t variableDescCount{ desc.DescriptorCount };
             VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI{
                 .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT,
                 .descriptorSetCount = descBindingFlags.bindingCount,

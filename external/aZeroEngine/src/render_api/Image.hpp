@@ -93,7 +93,7 @@ namespace aZero::RenderAPI
                 {
                     VkDebugUtilsObjectNameInfoEXT nameInfo{};
                     nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
-                    nameInfo.objectType = VK_OBJECT_TYPE_BUFFER;
+                    nameInfo.objectType = VK_OBJECT_TYPE_IMAGE;
                     nameInfo.objectHandle = (uint64_t)m_Image;
                     nameInfo.pObjectName = desc.Name.c_str();
 

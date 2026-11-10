@@ -1,7 +1,7 @@
 #pragma once
 #include <filesystem>
 #include <string>
-#include "AssetData.hpp"
+#include "asset/AssetData.hpp"
 #include "misc/stb_image.h"
 
 namespace aZero::File
@@ -65,9 +65,10 @@ namespace aZero::File
 			imageData.FaceCount = ktxTex->numFaces;
 			imageData.BaseWidth = ktxTex->baseWidth;
 			imageData.BaseHeight = ktxTex->baseHeight;
+			imageData.IsArray = ktxTex->isArray;
 			imageData.DepthOrArrayCount = ktxTex->isArray // Is array?
 				? ktxTex->numLayers // Yes => Array count
-				: imageData.Type == VkImageType::VK_IMAGE_TYPE_3D ? // No => Is it 3D? Yes => Get depth, No => Set 0 as depth.
+				: imageData.Type == VkImageType::VK_IMAGE_TYPE_3D ? // No => Is it 3D? Yes => Get depth, No => Set 1 as depth.
 				ktxTex->baseDepth : 1.f;
 
 			imageData.MipLevels.resize(ktxTex->numLevels);

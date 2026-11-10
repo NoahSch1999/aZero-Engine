@@ -4,7 +4,7 @@
 #include <fastgltf/types.hpp>
 #include <fastgltf/tools.hpp>
 
-#include "AssetData.hpp"
+#include "asset/AssetData.hpp"
 #include "ImageLoading.hpp"
 
 namespace aZero::File

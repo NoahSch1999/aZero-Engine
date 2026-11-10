@@ -132,7 +132,7 @@ namespace aZero::RenderAPI
 		uint32_t m_ComputeQueueIndex;
 		uint32_t m_CopyQueueIndex;
 
-		uint32_t m_VariadicDescriptorCount = 1024u;
+		uint32_t m_VariadicDescriptorCount = 10000u;
 		bool m_IsMeshShadingSupported = false;
 		bool m_IsSupportingDebugNames = false;
 
