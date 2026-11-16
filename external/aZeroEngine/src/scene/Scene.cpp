@@ -6,9 +6,11 @@
 #include "renderer/system/MeshSystem.hpp"
 #include "renderer/system/MaterialSystem.hpp"
 #include "renderer/system/TextureSystem.hpp"
+#include "asset/material/PBR_Material.hpp"
 
 #include "misc/ThreadPool.hpp"
 #include <glm/gtx/euler_angles.hpp>
+#include "asset/loading_saving/ImageLoading.hpp"
 
 glm::mat4x4 CreateWorldMatrix(const glm::vec3 position, const glm::vec3 rotation, const glm::vec3 scale)
 {
@@ -18,7 +20,6 @@ glm::mat4x4 CreateWorldMatrix(const glm::vec3 position, const glm::vec3 rotation
 	return T * R * S;
 }
 
-// todo Test so that submeshes work as expected
 void WriteRenderFormat(aZero::GPUStruct::InstanceCullData* pObjCull, aZero::GPUStruct::InstanceData* pInstance,
 	const aZero::Component::MeshComponent& mesh, const aZero::Component::PositionComponent& position, const aZero::Component::RotationComponent& rotation, const aZero::Component::ScaleComponent& scale, uint32_t& instanceDataIndex, uint32_t baseOffsetInstanceIndex)
 {
@@ -938,139 +939,180 @@ std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Meshes(c
 	for (int c = 0; c < asset->meshes.size(); c++)
 	{
 		Asset::MeshletMeshData& meshData = meshDataVec[c];
-		meshIndexToName[c] = meshData.Name;
-		mSystem.CreateMesh(meshData.Name, meshData);
+		std::string name = meshData.Name;
+		auto res = mSystem.CreateMesh(name, std::move(meshData));
+		if (res)
+		{
+			meshIndexToName[c] = name;
+		}
 	}
 
 	return meshIndexToName;
 }
-//
-//std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Materials(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset, const std::unordered_map<uint32_t, std::string>& imageIndexToName)
-//{
-//	std::unordered_map<uint32_t, std::string> materialIndexToName;
-//	for (int i = 0; i < asset->materials.size(); i++)
-//	{
-//		const fastgltf::Material& material = asset->materials[i];
-//		materialIndexToName[i] = material.name;
-//		Asset::MaterialData materialData;
-//		materialData.Name = material.name;
-//
-//		if (material.pbrData.baseColorTexture.has_value()) {
-//			auto imageIndex = asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.has_value() ? 
-//				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.value() : 
-//				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.value() :
-//				std::numeric_limits<uint32_t>::max();
-//
-//			Asset::Texture* texture = nullptr;
-//			if (imageIndexToName.contains(imageIndex)) {
-//				texture = assetManager.GetOrDefault<Asset::Texture>(imageIndexToName.at(imageIndex));
-//			}
-//
-//			materialData.Info.AlbedoTexture = texture;
-//		}
-//
-//		if (!materialData.Info.AlbedoTexture) {
-//			Asset::Texture* texture = assetManager.GetOrDefault<Asset::Texture>("Fallback");
-//			std::cout << "Fallback albedo texture used for material: " << materialData.Name << "\n";
-//			materialData.Info.AlbedoTexture = texture;
-//		}
-//
-//		if (material.normalTexture.has_value()) {
-//			auto imageIndex = asset->textures[material.normalTexture.value().textureIndex].imageIndex.has_value() ?
-//				asset->textures[material.normalTexture.value().textureIndex].imageIndex.value() :
-//				asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.value() :
-//				std::numeric_limits<uint32_t>::max();
-//
-//			Asset::Texture* texture = nullptr;
-//			if (imageIndexToName.contains(imageIndex)) {
-//				texture = assetManager.GetOrDefault<Asset::Texture>(imageIndexToName.at(imageIndex));
-//			}
-//			materialData.Info.NormalTexture = texture;
-//		}
-//
-//		if (!materialData.Info.NormalTexture) {
-//			Asset::Texture* texture = assetManager.GetOrDefault<Asset::Texture>("FallbackNormalMap");
-//			std::cout << "Fallback normal map used for material: " << materialData.Name << "\n";
-//			materialData.Info.NormalTexture = texture;
-//		}
-//
-//		if (material.pbrData.metallicRoughnessTexture.has_value()) {
-//			//uint32_t textureIndex = material.pbrData.metallicRoughnessTexture.value().textureIndex;
-//			// todo Lookup texture in asset manager and set ptr
-//			materialData.Info.MetallicRoughnessTexture = nullptr;
-//		}
-//
-//		materialData.Info.RoughnessFactor = material.pbrData.roughnessFactor;
-//		materialData.Info.MetallicFactor = material.pbrData.metallicFactor;
-//
-//		materialIndexToName[i] = materialData.Name;
-//		Asset::Material* mat = assetManager.Create<Asset::Material>(materialIndexToName[i], std::move(materialData));
-//	}
-//
-//	return materialIndexToName;
-//}
-//
-//std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Textures(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset)
-//{
-//	// todo Lazy :)))) Fix this
-//	aZero::ThreadPool tp(std::thread::hardware_concurrency());
-//
-//	std::unordered_map<uint32_t, std::string> imageIndexToName;
-//
-//	std::vector<std::future<void>> handles(asset->images.size());
-//
-//	std::vector<Asset::TextureData> textureDataVec(asset->images.size());
-//	for (int i = 0; i < asset->images.size(); i++)
-//	{
-//		handles[i] = tp.AddJobA([i, asset, &textureDataVec, &path] {
-//			Asset::TextureData& textureData = textureDataVec[i];
-//			const fastgltf::Image& image = asset->images[i];
-//
-//			std::visit(fastgltf::visitor{
-//				[](const auto& arg) {},
-//				[&textureData, &path](const fastgltf::sources::URI& filePath) {
-//					// todo Figure out how to handle formatting
-//					textureData.CreateFromFile(path.parent_path() / std::filesystem::path(filePath.uri.path()));
-//				},
-//				[&textureData, &image](const fastgltf::sources::Array& vector) {
-//					textureData.LoadFromMemory(image.name.c_str(), vector.bytes.data(), vector.bytes.size(), 0);
-//				},
-//				[asset, &textureData, &image](const fastgltf::sources::BufferView& view) {
-//					auto& bufferView = asset->bufferViews[view.bufferViewIndex];
-//					auto& buffer = asset->buffers[bufferView.bufferIndex];
-//					std::visit(fastgltf::visitor{
-//						[](const auto& arg) {},
-//						[&](const fastgltf::sources::Array& vector) {
-//							textureData.LoadFromMemory(image.name.c_str(), vector.bytes.data(), bufferView.byteLength, bufferView.byteOffset);
-//						}
-//					}, buffer.data);
-//				}
-//				}, image.data);
-//		});
-//	}
-//
-//	std::cout << "Waiting on texture loading + decoding...\n";
-//	for (auto& handle : handles)
-//	{
-//		handle.wait();
-//	}
-//	std::cout << "Creating texture resources...\n";
-//
-//	for (int i = 0; i < asset->images.size(); i++)
-//	{
-//		Asset::TextureData& textureData = textureDataVec[i];
-//		if (textureData.Data.size()) {
-//			imageIndexToName[i] = textureData.FilePath.generic_string();
-//			Asset::Texture* tex = assetManager.Create<Asset::Texture>(imageIndexToName[i], std::move(textureData));
-//			tex->ClearCachedData();
-//		}
-//	}
-//
-//	return imageIndexToName;
-//}
-//
-//#include <chrono>
-//
+
+std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Materials(const std::filesystem::path& path, System::MaterialSystem& matSystem, System::TextureSystem& tSystem, fastgltf::Asset* asset, const std::unordered_map<uint32_t, std::string>& imageIndexToName)
+{
+	std::unordered_map<uint32_t, std::string> materialIndexToName;
+	auto nullTexture = tSystem.GetTexture(System::TextureSystem::s_Null_TextureStr);
+	auto pbrMaterialTemplate = matSystem.GetMaterial("PBR");
+	if (!pbrMaterialTemplate || !nullTexture)
+	{
+		return materialIndexToName;
+	}
+
+	for (int i = 0; i < asset->materials.size(); i++)
+	{
+		const fastgltf::Material& material = asset->materials[i];
+
+		auto materialInstance = matSystem.CreateMaterialInstance(material.name.c_str(), pbrMaterialTemplate.value().get());
+		if (!materialInstance)
+		{
+			continue;
+		}
+
+		Asset::PBRMaterialData pbrData;
+
+		if (material.pbrData.baseColorTexture.has_value()) {
+			auto imageIndex = asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.has_value() ? 
+				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.value() : 
+				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.value() :
+				std::numeric_limits<uint32_t>::max();
+
+			if (auto iter = imageIndexToName.find(imageIndex); iter != imageIndexToName.end()) {
+				auto res = tSystem.GetTexture(iter->second);
+				if (res)
+				{
+					pbrData.AlbedoTexture = res.value().get().GetDescriptorIndex();
+				}
+				else
+				{
+					pbrData.AlbedoTexture = nullTexture.value().get().GetDescriptorIndex();
+				}
+			}
+		}
+
+		if (material.normalTexture.has_value()) {
+			auto imageIndex = asset->textures[material.normalTexture.value().textureIndex].imageIndex.has_value() ?
+				asset->textures[material.normalTexture.value().textureIndex].imageIndex.value() :
+				asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.value() :
+				std::numeric_limits<uint32_t>::max();
+
+			if (auto iter = imageIndexToName.find(imageIndex); iter != imageIndexToName.end()) {
+				auto res = tSystem.GetTexture(iter->second);
+				if (res)
+				{
+					pbrData.NormalMap = res.value().get().GetDescriptorIndex();
+				}
+				else
+				{
+					pbrData.NormalMap = nullTexture.value().get().GetDescriptorIndex();
+				}
+			}
+		}
+
+		if (material.pbrData.metallicRoughnessTexture.has_value()) {
+			// todo Impl
+			pbrData.RoughnessMetallic = nullTexture.value().get().GetDescriptorIndex();
+		}
+
+		pbrData.RoughnessFactor = material.pbrData.roughnessFactor;
+		pbrData.MetallicFactor = material.pbrData.metallicFactor;
+
+		materialIndexToName[i] = material.name;
+
+		materialInstance->get().RawCopy((void*)&pbrData, sizeof(pbrData));
+	}
+
+	return materialIndexToName;
+}
+
+std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Textures(const std::filesystem::path& path, System::TextureSystem& tSystem, fastgltf::Asset* asset)
+{
+	// todo Lazy :)))) Fix this
+	aZero::ThreadPool tp(std::thread::hardware_concurrency());
+
+	std::unordered_map<uint32_t, std::string> imageIndexToName;
+
+	std::vector<std::future<void>> handles(asset->images.size());
+
+	std::vector<Asset::ImageData> textureDataVec(asset->images.size());
+	for (int i = 0; i < asset->images.size(); i++)
+	{
+		handles[i] = tp.AddJobA([i, asset, &textureDataVec, &path, &tSystem] {
+			Asset::ImageData& textureData = textureDataVec[i];
+			const fastgltf::Image& image = asset->images[i];
+
+			std::visit(fastgltf::visitor{
+				[](const auto& arg) {},
+				[&textureData, &path, &tSystem](const fastgltf::sources::URI& filePath) {
+					// todo Figure out how to handle formatting
+					std::filesystem::path relative(filePath.uri.path());
+					auto res = aZero::Asset::LoadImageData(path.parent_path() / relative, true);
+					if (res && res.value().HasValidData())
+					{
+						textureData = std::move(res.value());
+					}
+				},
+				[&textureData, &image](const fastgltf::sources::Array& vector) {
+					auto res = aZero::Asset::LoadImageDataFromMemory(image.name.c_str(), vector.bytes.data(), vector.bytes.size(), 0);
+					if (res.HasValidData())
+					{
+						textureData = std::move(res);
+					}
+				},
+				[asset, &textureData, &image](const fastgltf::sources::BufferView& view) {
+					auto& bufferView = asset->bufferViews[view.bufferViewIndex];
+					auto& buffer = asset->buffers[bufferView.bufferIndex];
+					std::visit(fastgltf::visitor{
+						[](const auto& arg) {},
+						[&](const fastgltf::sources::Array& vector) {
+							auto res = aZero::Asset::LoadImageDataFromMemory(image.name.c_str(), vector.bytes.data(), bufferView.byteLength, bufferView.byteOffset);
+							if (res.HasValidData())
+							{
+								textureData = std::move(res);
+							}
+						}
+					}, buffer.data);
+				}
+				}, image.data);
+		});
+	}
+
+	std::cout << "Waiting on texture loading + decoding...\n";
+	for (auto& handle : handles)
+	{
+		handle.wait();
+	}
+	std::cout << "Creating texture resources...\n";
+	/*for (size_t i = 0; i < textureDataVec.size(); i++)
+	{
+		const auto& data = textureDataVec[i];
+
+		std::cout
+			<< "Image " << i
+			<< " | Width: " << data.BaseWidth
+			<< " | Height: " << data.BaseHeight
+			<< " | Data size: " << data.Data.size()
+			<< " | Mips: " << data.MipLevels.size()
+			<< " | Valid: " << data.HasValidData()
+			<< '\n';
+	}*/
+	for (int i = 0; i < asset->images.size(); i++)
+	{
+		Asset::ImageData& textureData = textureDataVec[i];
+		std::string name = textureData.Name;
+		auto res = tSystem.CreateTexture(name, std::move(textureData));
+		if (res)
+		{
+			imageIndexToName[i] = name;
+			//tex->ClearCachedData();
+		}
+	}
+
+	return imageIndexToName;
+}
+
+// todo If fail -> empty
 bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, System::MeshSystem& meshSystem, System::MaterialSystem& matSystem, System::TextureSystem& tSystem)
 {
 	static constexpr auto supportedExtensions =
@@ -1114,7 +1156,7 @@ bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, System::Me
 	// ------------------------------------------------------------------------------------------------------------------------------------------------
 	std::cout << "------------------------------------\nTextures loading... ";
 
-	//std::unordered_map<uint32_t, std::string> textureIndexToName = this->LoadGltf_Textures(path, assetManager, asset);
+	std::unordered_map<uint32_t, std::string> textureIndexToName = this->LoadGltf_Textures(path, tSystem, asset);
 
 	auto end = clock.now();
 	std::chrono::duration<double> diff = end - start;
@@ -1140,7 +1182,7 @@ bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, System::Me
 
 	std::cout << "------------------------------------\nMaterials loading... ";
 
-	//std::unordered_map<uint32_t, std::string> materialIndexToName = this->LoadGltf_Materials(path, assetManager, asset, textureIndexToName);
+	std::unordered_map<uint32_t, std::string> materialIndexToName = this->LoadGltf_Materials(path, matSystem, tSystem, asset, textureIndexToName);
 
 	end = clock.now();
 	diff = end - start;
@@ -1152,6 +1194,12 @@ bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, System::Me
 	start = clock.now();
 
 	std::cout << "------------------------------------\nScene nodes loading... ";
+
+	auto defaultPbrInstance = matSystem.GetMaterialInstance(System::MaterialSystem::s_DefaultPBRInstanceStr);
+	if (!defaultPbrInstance)
+	{
+		return false;
+	}
 
 	fastgltf::iterateSceneNodes(*asset, 0, fastgltf::math::fmat4x4(),
 		[&](const fastgltf::Node& node, fastgltf::math::fmat4x4 matrix) {
@@ -1176,13 +1224,19 @@ bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, System::Me
 
 			if (node.meshIndex.has_value()) {
 				auto mesh = meshSystem.GetMesh(meshIndexToName[node.meshIndex.value()]);
-				auto material = matSystem.GetMaterialInstance("MyMaterialInstance");
-				if (mesh && material) {
-					//Asset::Material* material = assetManager.GetOrDefault<Asset::Material>(materialIndexToName[asset->meshes[node.meshIndex.value()].primitives[0].materialIndex.value()]);
-					Component::MeshComponent meshComponent(mesh.value().get(), material.value().get());
+				if (mesh) {
+					Component::MeshComponent meshComponent(mesh.value().get(), defaultPbrInstance->get());
 					for (int32_t i = 0; i < meshComponent.m_NumSubmeshes; i++)
 					{
-						meshComponent.SetMaterial(i, material.value());
+						if (auto iter = materialIndexToName.find(asset->meshes[node.meshIndex.value()].primitives[i].materialIndex.value()); iter != materialIndexToName.end())
+						{
+							auto submeshMaterial = matSystem.GetMaterialInstance(iter->second);
+							if (!submeshMaterial)
+							{
+								continue;
+							}
+							meshComponent.SetMaterial(i, submeshMaterial->get());
+						}
 					}
 					entity.set<Component::MeshComponent>(meshComponent);
 				}

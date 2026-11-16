@@ -86,19 +86,6 @@ namespace aZero::Editor
 			}
 
 			{
-				auto ent = m_Scene->GetWorld().entity("mesh2");
-				p.Position = { 0,0.3,0 };
-				r.Rotation = { 0,45,45 };
-				s.Scale = { 1,1,1 };
-				ent.set(p);
-				ent.set(r);
-				ent.set(s);
-				Component::MeshComponent m(m_Engine->GetMeshSystem().GetMesh("MyMesh").value().get(), m_Engine->GetMaterialSystem().GetMaterialInstance("MyMaterialInstance").value().get());
-				ent.set(m);
-				ent.add<Component::StaticComponent>();
-			}
-
-			{
 				auto ent = m_Scene->GetWorld().entity("mesh3");
 				p.Position = { 0,6,1 };
 				r.Rotation = { 0,0,0 };
@@ -143,7 +130,7 @@ namespace aZero::Editor
 			}
 
 			m_Scene = std::make_unique<Scene::Scene>();
-			m_Scene->LoadGltf(std::string(PROJECT_DIRECTORY) + "scenes/Sponza.gltf", m_Engine->GetMeshSystem(), m_Engine->GetMaterialSystem(), m_Engine->GetTextureSystem());
+			m_Scene->LoadGltf(std::string(PROJECT_DIRECTORY) + "scenes/sponza/sponza.gltf", m_Engine->GetMeshSystem(), m_Engine->GetMaterialSystem(), m_Engine->GetTextureSystem());
 
 
 			{
@@ -171,6 +158,19 @@ namespace aZero::Editor
 				cam.add<Component::StaticComponent>();
 			}
 
+
+			{
+				auto ent = m_Scene->GetWorld().entity("mesh2");
+				p.Position = { 0,0.3,0 };
+				r.Rotation = { 0,45,45 };
+				s.Scale = { 1,1,1 };
+				ent.set(p);
+				ent.set(r);
+				ent.set(s);
+				Component::MeshComponent m(m_Engine->GetMeshSystem().GetMesh("MyMesh").value().get(), m_Engine->GetMaterialSystem().GetMaterialInstance("MyMaterialInstance").value().get());
+				ent.set(m);
+				ent.add<Component::StaticComponent>();
+			}
 			m_Engine->GetRenderer().FinalizeFrame();
 		}
 

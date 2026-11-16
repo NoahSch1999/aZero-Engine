@@ -9,6 +9,7 @@
 #include "renderer/FrameAllocator.hpp"
 #include "render_api/Compiler.hpp"
 #include "render_api/RenderPass.hpp"
+#include "TextureSystem.hpp"
 
 namespace aZero::Renderer { class Renderer; }
 
@@ -30,9 +31,9 @@ namespace aZero::System
 			Asset::MaterialInstance Instance;
 		};
 	public:
-
+		static inline const char* s_DefaultPBRInstanceStr = "Default_PBR";
 		MaterialSystem() = default;
-		MaterialSystem(RenderAPI::Core& core, Compiler::Compiler& diCompiler, Renderer::ResourceRecycler& recycler, uint64_t bufferSize, uint32_t maxInitialMaterials)
+		MaterialSystem(RenderAPI::Core& core, Compiler::Compiler& diCompiler, Renderer::ResourceRecycler& recycler, uint64_t bufferSize, uint32_t maxInitialMaterials, System::TextureSystem& textureSystem)
 			:m_diCore(&core), m_diCompiler(&diCompiler), m_Allocator(aZero::FreelistAllocator(bufferSize))
 		{
 			{

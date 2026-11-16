@@ -299,6 +299,7 @@ namespace aZero::RenderAPI
 				std::cout << "Failed to create logical device.\n";
 				return false;
 			}
+			volkLoadDevice(m_Device);
 
 			return true;
 		}
@@ -401,20 +402,22 @@ namespace aZero::RenderAPI
 
 		bool InitVma()
 		{
-			// setup vma
-			VmaVulkanFunctions vkFunctions{
-				.vkGetInstanceProcAddr = vkGetInstanceProcAddr,
-				.vkGetDeviceProcAddr = vkGetDeviceProcAddr,
-				.vkCreateImage = vkCreateImage
-			};
+			VmaAllocatorCreateInfo allocatorCI{};
 
-			VmaAllocatorCreateInfo allocatorCI{
-				.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT,
-				.physicalDevice = m_PhysicalDevice,
-				.device = m_Device,
-				.pVulkanFunctions = &vkFunctions,
-				.instance = m_Instance
-			};
+			allocatorCI.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT;
+			allocatorCI.physicalDevice = m_PhysicalDevice;
+			allocatorCI.device = m_Device;
+			allocatorCI.instance = m_Instance;
+			allocatorCI.vulkanApiVersion = VK_API_VERSION_1_3;
+
+			VmaVulkanFunctions vkFunctions{};
+
+			vmaImportVulkanFunctionsFromVolk(
+				&allocatorCI,
+				&vkFunctions
+			);
+
+			allocatorCI.pVulkanFunctions = &vkFunctions;
 
 			if (!RenderAPI::chkSucceed(vmaCreateAllocator(&allocatorCI, &m_VmaAllocator)))
 			{

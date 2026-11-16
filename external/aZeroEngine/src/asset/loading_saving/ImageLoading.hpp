@@ -4,8 +4,9 @@
 #include "asset/AssetData.hpp"
 #include "misc/stb_image.h"
 
-namespace aZero::File
+namespace aZero::Asset
 {
+	// todo Support generating mips on the spot
 	inline std::optional<aZero::Asset::ImageData> LoadImageData(const std::filesystem::path& path, bool generateMips = true)
 	{
 		if (path.extension() == ".ktx2")
@@ -174,7 +175,7 @@ namespace aZero::File
 		return {};
 	}
 
-	inline aZero::Asset::ImageData LoadImageDataFromMemory(const std::filesystem::path& path, const std::byte* memoryPtr, std::size_t numBytes, std::size_t offsetIntoMemoryPtr = 0)
+	inline aZero::Asset::ImageData LoadImageDataFromMemory(const std::string& name, const std::byte* memoryPtr, std::size_t numBytes, std::size_t offsetIntoMemoryPtr = 0)
 	{
 		aZero::Asset::ImageData imageData;
 
@@ -187,7 +188,7 @@ namespace aZero::File
 		imageData.BaseWidth = width;
 		imageData.BaseHeight = height;
 		imageData.DepthOrArrayCount = 1;
-		imageData.Name = path.filename().generic_string();
+		imageData.Name = name;
 
 		imageData.Data.resize(width * height * STBI_rgb_alpha);
 		memcpy(imageData.Data.data(), loadedImage, imageData.Data.size());
@@ -198,7 +199,7 @@ namespace aZero::File
 		miplevel.SlicePitch = miplevel.RowPitch * height;
 		imageData.MipLevels.emplace_back(miplevel);
 
-		if (path.filename().generic_string().ends_with(std::string("_BaseColor") + path.extension().generic_string()))
+		if (name.ends_with(std::string("_BaseColor")))
 		{
 			imageData.Format = VkFormat::VK_FORMAT_R8G8B8A8_SRGB;
 		}

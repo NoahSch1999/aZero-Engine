@@ -20,6 +20,7 @@ namespace aZero::System
             Asset::Texture Texture;
         };
 	public:
+        static inline const char* s_Null_TextureStr = "Null_Texture";
         TextureSystem() = default;
         TextureSystem(RenderAPI::Core& core, Renderer::ResourceRecycler& recycler, uint32_t framesInFlight)
             :m_diCore(&core), m_diRecycler(&recycler)

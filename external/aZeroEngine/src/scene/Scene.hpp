@@ -98,10 +98,10 @@ namespace aZero
 			void UnregisterFromPhysics(flecs::entity entity, Physics::Body& body);
 
 			std::unordered_map<uint32_t, std::string> LoadGltf_Meshes(const std::filesystem::path& path, System::MeshSystem& mSystem, fastgltf::Asset* asset);
-			//std::unordered_map<uint32_t, std::string> LoadGltf_Materials(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset, const std::unordered_map<uint32_t, std::string>& imageIndexToName);
+			std::unordered_map<uint32_t, std::string> LoadGltf_Materials(const std::filesystem::path& path, System::MaterialSystem& matSystem, System::TextureSystem& tSystem, fastgltf::Asset* asset, const std::unordered_map<uint32_t, std::string>& imageIndexToName);
 
-			//// Currently only supports images
-			//std::unordered_map<uint32_t, std::string> LoadGltf_Textures(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset);
+			// Currently only supports images
+			std::unordered_map<uint32_t, std::string> LoadGltf_Textures(const std::filesystem::path& path, System::TextureSystem& tSystem, fastgltf::Asset* asset);
 
 			flecs::world m_World;
 			flecs::observer m_Rigidbody_OnSet_Observer;

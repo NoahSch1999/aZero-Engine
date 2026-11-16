@@ -38,6 +38,20 @@ namespace aZero::Asset
 			}
 		}
 
+		// Spooky scary copies
+		void RawCopy(void* ptr, size_t size, bool markDirty = true)
+		{
+			if (size == m_diMaterial->GetParameterSizeInfo().TotalSize)
+			{
+				memcpy(m_Data.data(), ptr, size);
+				m_IsDirty = markDirty;
+			}
+			else
+			{
+				std::cout << "Error matching material raw copy: " << m_Name << "\n";
+			}
+		}
+
 		template<typename T> requires std::is_trivially_copyable_v<T>
 		std::optional<T> GetParameter(const std::string& name)
 		{

@@ -55,7 +55,7 @@ namespace aZero::Renderer
 
 			m_MeshSystem = std::make_unique<System::MeshSystem>(*m_diCore, *m_ResourceRecycler);
 			m_TextureSystem = std::make_unique<System::TextureSystem>(*m_diCore, *m_ResourceRecycler, frameBufferCount);
-			m_MaterialSystem = std::make_unique<System::MaterialSystem>(*m_diCore, compiler, *m_ResourceRecycler, (uint64_t)(2048 * 2048), 1000);
+			m_MaterialSystem = std::make_unique<System::MaterialSystem>(*m_diCore, compiler, *m_ResourceRecycler, (uint64_t)(2048 * 2048), 1000, *m_TextureSystem.get());
 
 
 			{
@@ -104,10 +104,73 @@ namespace aZero::Renderer
 			}
 
 			this->NextFrame();
+			this->InitSystemDefaults();
 			this->TestInit();
 			this->RebuildComputePipeline();
 			this->FinalizeFrame();
 			this->FlushRenderingCommands(); // Ensures that all init stuff is ready for the cpu to consume
+		}
+
+		void InitSystemDefaults()
+		{
+			Asset::ImageData defaultData{
+				.BaseWidth = 1,
+				.BaseHeight = 1,
+				.FaceCount = 1,
+				.DepthOrArrayCount = 1,
+				.IsArray = false,
+				.Format = VkFormat::VK_FORMAT_R8G8B8A8_SRGB,
+				.Type = VkImageType::VK_IMAGE_TYPE_2D
+			};
+
+			aZero::Asset::ImageData::Mip miplevel;
+			miplevel.Offset = 0;
+			miplevel.RowPitch = defaultData.BaseWidth * sizeof(DWORD);
+			miplevel.SlicePitch = miplevel.RowPitch * defaultData.BaseHeight;
+
+			defaultData.MipLevels.emplace_back(miplevel);
+
+			defaultData.Data.resize(sizeof(uint32_t));
+			memcpy(defaultData.Data.data(), (void*)&miplevel.Offset, sizeof(uint32_t));
+
+			m_TextureSystem->CreateTexture(System::TextureSystem::s_Null_TextureStr, defaultData);
+
+			//
+
+			Asset::MaterialDefinition def{
+				.Parameters = {
+					{"AlbedoTexture", Asset::ParameterType::tex2D},
+					{"NormalMap", Asset::ParameterType::tex2D},
+					{"RoughnessMetallic", Asset::ParameterType::tex2D},
+					{"GlowMap", Asset::ParameterType::tex2D},
+					{"TransparencyMap", Asset::ParameterType::tex2D},
+					{"RoughnessFactor", Asset::ParameterType::float1},
+					{"MetallicFactor", Asset::ParameterType::float1},
+				},
+				.Properties = 0,
+				.MaterialShaderPath = std::string(ENGINE_SHADER_DIRECTORY) + "/PBR_Material.slang",
+				.MaterialShaderName = "PBRMaterial"
+			};
+
+			auto pbrMaterialRes = m_MaterialSystem->CreateMaterial("PBR", def);
+			if (pbrMaterialRes)
+			{
+				auto materialInstance = m_MaterialSystem->CreateMaterialInstance("Default_PBR", pbrMaterialRes.value().get());
+				if (materialInstance)
+				{
+					auto nullTexture = m_TextureSystem->GetTexture(System::TextureSystem::s_Null_TextureStr);
+					if (nullTexture)
+					{
+						materialInstance->get().SetParameter("AlbedoTexture", nullTexture.value().get().GetDescriptorIndex());
+						materialInstance->get().SetParameter("NormalMap", nullTexture.value().get().GetDescriptorIndex());
+						materialInstance->get().SetParameter("RoughnessMetallic", nullTexture.value().get().GetDescriptorIndex());
+						materialInstance->get().SetParameter("GlowMap", nullTexture.value().get().GetDescriptorIndex());
+						materialInstance->get().SetParameter("TransparencyMap", nullTexture.value().get().GetDescriptorIndex());
+						materialInstance->get().SetParameter("RoughnessFactor", 0);
+						materialInstance->get().SetParameter("MetallicFactor", 0);
+					}
+				}
+			}
 		}
 
 		void RebuildComputePipeline()
@@ -457,11 +520,12 @@ namespace aZero::Renderer
 			auto [vp, scizzor] = camera.GetViewportAndScizzorRect();
 			for (uint32_t i = 0; i < materialOffsets.size(); i++)
 			{
+				// todo Skip empty ones
 				Pipeline::RenderPass& pass = m_MaterialSystem->m_Passes[i];
 
 				Pipeline::RenderPass::RenderDesc rDesc{
 					.RenderRect = scizzor,
-					.DescriptorSets = {/*&m_TextureSystem->m_DescriptorSet*/},
+					.DescriptorSets = {&m_TextureSystem->m_DescriptorSet},
 					.Callback = [&](RenderAPI::CommandBuffer& cb, Pipeline::RenderPass& pass) {
 
 						// since we made them dynamic when creating the pipeline we overwrite them here
@@ -500,12 +564,17 @@ namespace aZero::Renderer
 				Pipeline::RenderPass::RenderDesc::ColorTarget cTarget;
 				cTarget.LoadOp = camera.m_ClearColorTargetOnRender ? VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_CLEAR : VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_LOAD;
 				cTarget.View = camera.m_OptColorTarget.value().get().m_View.Get();
-				rDesc.ColorTargets.push_back(cTarget);
 
 				Pipeline::RenderPass::RenderDesc::DepthStencilTarget dsTarget{
 					.View = &camera.m_OptDepthStencilTarget.value().get().m_View,
 					.LoadOp = camera.m_ClearDepthStencilTargetOnRender ? VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_CLEAR : VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_LOAD
 				};
+				if (i != 0)
+				{
+					cTarget.LoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+					dsTarget.LoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+				}
+				rDesc.ColorTargets.push_back(cTarget);
 				rDesc.DepthTarget = dsTarget;
 				pass.Render(commandBuffer, rDesc);
 			}

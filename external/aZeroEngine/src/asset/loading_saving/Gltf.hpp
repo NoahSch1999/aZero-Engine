@@ -203,14 +203,14 @@ namespace aZero::File
 		std::visit(fastgltf::visitor{
 			[](const auto& arg) {},
 			[&imageData, &path](const fastgltf::sources::URI& filePath) {
-				auto res = aZero::File::LoadImageData(path.parent_path() / std::filesystem::path(filePath.uri.path()));
+				auto res = aZero::Asset::LoadImageData(path.parent_path() / std::filesystem::path(filePath.uri.path()));
 				if (res.has_value())
 				{
 					imageData = std::move(res.value());
 				}
 			},
 			[&imageData, &image](const fastgltf::sources::Array& vector) {
-				imageData = aZero::File::LoadImageDataFromMemory(image.name.c_str(), vector.bytes.data(), vector.bytes.size(), 0);
+				imageData = aZero::Asset::LoadImageDataFromMemory(image.name.c_str(), vector.bytes.data(), vector.bytes.size(), 0);
 			},
 			[asset, &imageData, &image](const fastgltf::sources::BufferView& view) {
 				auto& bufferView = asset->bufferViews[view.bufferViewIndex];
@@ -218,7 +218,7 @@ namespace aZero::File
 				std::visit(fastgltf::visitor{
 					[](const auto& arg) {},
 					[&](const fastgltf::sources::Array& vector) {
-						imageData = aZero::File::LoadImageDataFromMemory(image.name.c_str(), vector.bytes.data(), bufferView.byteLength, bufferView.byteOffset);
+						imageData = aZero::Asset::LoadImageDataFromMemory(image.name.c_str(), vector.bytes.data(), bufferView.byteLength, bufferView.byteOffset);
 					}
 				}, buffer.data);
 			}
