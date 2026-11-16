@@ -17,6 +17,7 @@ namespace aZero::Renderer
 		struct AllocationInfo
 		{
 			std::vector<VkBufferCopy> CopyRegions;
+			VkBufferMemoryBarrier2* BarrierPtr;
 		};
 	public:
 
@@ -52,6 +53,21 @@ namespace aZero::Renderer
 			return *this;
 		}
 
+		void RecordUpload(RenderAPI::CommandBuffer& cmdBuffer, void* data, uint32_t size, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset)
+		{
+			std::byte* ptr = m_Allocator.Allocate(size);
+			memcpy(ptr, data, size);
+			uint32_t offset = m_Allocator.GetOffset() - size;
+
+			VkBufferCopy copyRegion{
+				.srcOffset = (VkDeviceSize)offset,
+				.dstOffset = (VkDeviceSize)dstOffset,
+				.size = (VkDeviceSize)size
+			};
+
+			cmdBuffer.Copy(m_StagingBuffer, dstBuffer, { copyRegion });
+		}
+
 		void Allocate(void* data, uint32_t size, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset)
 		{
 			std::byte* ptr = m_Allocator.Allocate(size);
@@ -64,6 +80,7 @@ namespace aZero::Renderer
 				.size = (VkDeviceSize)size
 			};
 			m_Allocations[dstBuffer.Get()].CopyRegions.push_back(copyRegion);
+			m_Allocations[dstBuffer.Get()].BarrierPtr = dstBuffer.GetTransitionPtr();
 		}
 
 		template<typename T> requires std::is_trivially_copyable_v<T>
@@ -86,25 +103,21 @@ namespace aZero::Renderer
 				.size = (VkDeviceSize)size
 			};
 			m_Allocations[dstBuffer.Get()].CopyRegions.push_back(copyRegion);
+			m_Allocations[dstBuffer.Get()].BarrierPtr = dstBuffer.GetTransitionPtr();
 		}
 
 		void Record(RenderAPI::CommandBuffer& cmdBuffer, bool clear = true)
 		{
-			VkBufferMemoryBarrier2 stagingBufferBarrier = {
-					.sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-					.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-					.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
-					.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
-					.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
-					.srcQueueFamilyIndex = m_diCore->GetIndexForQueueType(RenderAPI::EQueueType::Graphics),
-					.dstQueueFamilyIndex = m_diCore->GetIndexForQueueType(RenderAPI::EQueueType::Graphics),
-					.buffer = m_StagingBuffer.Get(),
-					.offset = 0,
-					.size = m_StagingBuffer.GetDesc().Size
+			aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+					.DstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+					.DstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+					.Offset = 0,
+					.Size = m_StagingBuffer.GetDesc().Size
 			};
-			cmdBuffer.Barrier({}, {}, { stagingBufferBarrier });
+			m_StagingBuffer.Transition(trDesc);
+			cmdBuffer.Barrier({}, {}, { m_StagingBuffer.GetTransition() });
 
-			for (const auto& [buffer, allocationInfo] : m_Allocations)
+			for (auto& [buffer, allocationInfo] : m_Allocations)
 			{
 				// Find the min and max copy range for the buffer to minimize sync on data that isnt touched. If the min and max are far apart its no big diff, but if they are compact it can be good! :)
 				VkDeviceSize barrierSpanStart = 0, barrierSpanEnd = 0;
@@ -130,9 +143,8 @@ namespace aZero::Renderer
 				VkBufferMemoryBarrier2 preCopyBarrier = {
 					.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
 
-					.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-					.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT |
-									 VK_ACCESS_2_MEMORY_WRITE_BIT,
+					.srcStageMask = allocationInfo.BarrierPtr->srcStageMask,
+					.srcAccessMask = allocationInfo.BarrierPtr->srcAccessMask,
 
 					.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
 					.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -145,6 +157,9 @@ namespace aZero::Renderer
 					.size = barrierSpanEnd - barrierSpanStart
 				};
 
+				allocationInfo.BarrierPtr->dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+				allocationInfo.BarrierPtr->dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+
 				cmdBuffer.Barrier({}, {}, { preCopyBarrier });
 				
 				cmdBuffer.Copy(m_StagingBuffer.Get(), buffer, allocationInfo.CopyRegions);
@@ -153,8 +168,8 @@ namespace aZero::Renderer
 				VkBufferMemoryBarrier2 postCopyBarrier = {
 					.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
 
-					.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
-					.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+					.srcStageMask = allocationInfo.BarrierPtr->dstStageMask,
+					.srcAccessMask = allocationInfo.BarrierPtr->dstAccessMask,
 
 					.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 					.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT |
@@ -167,6 +182,8 @@ namespace aZero::Renderer
 					.offset = barrierSpanStart,
 					.size = barrierSpanEnd - barrierSpanStart
 				};
+				allocationInfo.BarrierPtr->dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+				allocationInfo.BarrierPtr->dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
 
 				cmdBuffer.Barrier({}, {}, { postCopyBarrier });
 			}
@@ -181,7 +198,9 @@ namespace aZero::Renderer
 		{
 			m_Allocations.clear();
 		}
-		
+
+		aZero::LinearAllocator<>& GetAllocator() { return m_Allocator; }
+		RenderAPI::Buffer& GetBuffer() { return m_StagingBuffer; }
 	private:
 		void NextFrame()
 		{

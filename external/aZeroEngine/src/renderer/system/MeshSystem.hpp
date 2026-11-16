@@ -50,8 +50,10 @@ namespace aZero::System
 			}
 
 			GpuMeshletMesh mesh;
-			mesh.Mesh.m_Data = data;
+			mesh.Mesh.SetData(data);
+			mesh.Mesh.Name = std::get<Asset::MeshletMeshData>(data).Name;
 			this->UploadMesh(mesh);
+			mesh.Mesh.SetNotDirty();
 			auto [it, inserted] = m_MeshletMeshes.emplace(name, std::move(mesh));
 			return it->second.Mesh;
 		}
@@ -119,6 +121,7 @@ namespace aZero::System
 					.UsageBits = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 					.MemoryType = RenderAPI::EMemoryType::VRAM,
 					.SeperateHeap = true,
+					.Name = "Mesh::VERTEX_BUFFER::" + mesh.Name,
 					.OptResourceRecycler = *m_diRecycler
 				};
 				totalSize += vertexDataSize;
@@ -129,6 +132,7 @@ namespace aZero::System
 					.UsageBits = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 					.MemoryType = RenderAPI::EMemoryType::VRAM,
 					.SeperateHeap = true,
+					.Name = "Mesh::MESHLET_BUFFER::" + mesh.Name,
 					.OptResourceRecycler = *m_diRecycler
 				};
 				totalSize += meshletDataSize;
@@ -140,6 +144,7 @@ namespace aZero::System
 					.UsageBits = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VkBufferUsageFlagBits::VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 					.MemoryType = RenderAPI::EMemoryType::VRAM,
 					.SeperateHeap = true,
+					.Name = "Mesh::MESHLETBOUNDS_BUFFER::" + mesh.Name,
 					.OptResourceRecycler = *m_diRecycler
 				};
 				totalSize += meshletBoundsDataSize;
@@ -164,18 +169,16 @@ namespace aZero::System
 				m_diFrameCommandBuffer->Copy(stagingBuffer, vertexDataSize, gpuMesh.MeshletBuffer, 0, meshletDataSize);
 				m_diFrameCommandBuffer->Copy(stagingBuffer, vertexDataSize + meshletDataSize, gpuMesh.MeshletBoundsBuffer, 0, meshletBoundsDataSize);
 
-				auto buildBarrier = [](const RenderAPI::Buffer& buffer) -> VkBufferMemoryBarrier2 {
-					VkBufferMemoryBarrier2 stagingBufferBarrier = {
-						.sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-						.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
-						.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-						.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-						.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
-						.buffer = buffer.Get(),
-						.offset = 0,
-						.size = buffer.GetDesc().Size
+				auto buildBarrier = [](RenderAPI::Buffer& buffer) -> VkBufferMemoryBarrier2 {
+					aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+						.DstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+						.Offset = 0,
+						.Size = buffer.GetDesc().Size
 					};
-					return stagingBufferBarrier;
+					buffer.Transition(trDesc);
+
+					return buffer.GetTransition();
 					};
 				std::vector<VkBufferMemoryBarrier2> barriers = {
 					buildBarrier(gpuMesh.VertexBuffer),

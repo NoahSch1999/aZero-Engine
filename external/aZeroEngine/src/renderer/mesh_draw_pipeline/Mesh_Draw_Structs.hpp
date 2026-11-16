@@ -1,7 +1,7 @@
 #pragma once
-#include "Primitives.hpp"
+#include "asset/mesh/Primitives.hpp"
 
-namespace aZero::Rendering
+namespace aZero::GPUStruct
 {
     struct CameraData
     {
@@ -12,33 +12,41 @@ namespace aZero::Rendering
 
     struct InstanceData
     {
-        glm::mat4 WorldMatrix;
+        glm::mat4x4 WorldMatrix;
         VkDeviceAddress MeshletBDA;
         VkDeviceAddress VertexBDA;
+        VkDeviceAddress MeshletBoundsBDA;
+        VkDeviceAddress MaterialPtr;
         uint32_t MeshletCount;
-        uint32_t MaterialIndex;
     };
 
     struct InstanceCullData
     {
         aZero::BoundingVolume::BoundingSphere WorldSpaceBounds;
         uint32_t MeshletCount;
+        uint32_t MaterialTypeIndex;
     };
 
-    struct GeoDrawPushConstants
+    struct MeshDrawPushConstants
     {
         VkDeviceAddress CameraBufferPtr;
-        VkDeviceAddress MeshletBoundBufferPtr;
-        VkDeviceAddress MaterialBufferPtr;
         VkDeviceAddress InstanceDataBufferPtr;
         VkDeviceAddress DrawMetadataBufferPtr;
+
+        VkDeviceAddress PointLightsPtr;
+        uint32_t NumPointLights;
+        VkDeviceAddress SpotLightsPtr;
+        uint32_t NumSpotLights;
+        VkDeviceAddress DirectionalLightsPtr;
+        uint32_t NumDirectionalLights;
 
         uint32_t RenderMode;
     };
 
-    struct InstanceCullPushConstants
+    struct ComputeCullConstants
     {
         VkDeviceAddress IndirectArgumentBufferPtr;
+        VkDeviceAddress IndirectArgumentCounterBufferPtr;
         VkDeviceAddress CameraBufferPtr;
         VkDeviceAddress InstanceCullDataBufferPtr;
         VkDeviceAddress DrawMetadataBufferPtr;
@@ -55,7 +63,6 @@ namespace aZero::Rendering
     struct IndirectArgumentCounter
     {
         uint32_t Count;
-        uint32_t Pad[3];
     };
 
     struct DrawMetaData
@@ -72,5 +79,30 @@ namespace aZero::Rendering
         uint32_t RoughnessMetallic;
         uint32_t GlowMap;
         uint32_t TransparencyMap;
+    };
+
+    struct PointLight
+    {
+         glm::vec3 Color;
+         glm::vec3 Position;
+         float Range;
+         float Falloff;
+         float Intensity;
+    };
+
+    struct SpotLight
+    {
+         glm::vec3 Color;
+         glm::vec3 Position;
+         glm::vec3 Direction;
+         float Intensity;
+         float Radius;
+    };
+
+    struct DirectionalLight
+    {
+        glm::vec3 Color;
+        glm::vec3 Direction;
+        float Intensity;
     };
 }

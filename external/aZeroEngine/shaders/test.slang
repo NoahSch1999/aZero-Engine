@@ -38,7 +38,7 @@ RasterVertex vsMain(VSInput input) {
     // output.Pos = mul(Constants.VP, float4(input.Pos.x, input.Pos.y * -1.0, input.Pos.z, 1.0));
     output.Position = float4(input.Pos, 1.f);
     output.UV = input.UV;
-    output.MaterialIndex = 0;
+    output.MaterialPtr = 0;
     output.Meshletid = 0;
     output.Normal = float3(1, 2, 3);
     output.WorldPosition = float3(input.Pos);
@@ -51,6 +51,7 @@ float4 psMain<T : IMaterial>(RasterVertex input) {
     float4 color = float4(0, 0, 0, 1);
 
     T material;
+    material.PreLightCalc(Constants.MaterialPtr, input);
     color = material.CalcPointLights(color, Constants.MaterialPtr, input, Constants.PointLightsPtr, Constants.NumPointLights);
     color = material.CalcSpotLights(color, Constants.MaterialPtr, input, Constants.SpotLightsPtr, Constants.NumSpotLights);
     color = material.CalcDirectionalLights(color, Constants.MaterialPtr, input, Constants.DirectionalLightsPtr, Constants.NumDirectionalLights);

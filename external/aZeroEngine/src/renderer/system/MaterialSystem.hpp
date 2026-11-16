@@ -8,6 +8,7 @@
 #include "misc/FreelistAllocator.hpp"
 #include "renderer/FrameAllocator.hpp"
 #include "render_api/Compiler.hpp"
+#include "render_api/RenderPass.hpp"
 
 namespace aZero::Renderer { class Renderer; }
 
@@ -29,7 +30,6 @@ namespace aZero::System
 			Asset::MaterialInstance Instance;
 		};
 	public:
-		using MaterialIndirectCounter = uint32_t;
 
 		MaterialSystem() = default;
 		MaterialSystem(RenderAPI::Core& core, Compiler::Compiler& diCompiler, Renderer::ResourceRecycler& recycler, uint64_t bufferSize, uint32_t maxInitialMaterials)
@@ -48,7 +48,7 @@ namespace aZero::System
 
 			{
 				const RenderAPI::Buffer::Desc desc{
-					.Size = maxInitialMaterials * sizeof(MaterialIndirectCounter),
+					.Size = maxInitialMaterials * sizeof(uint32_t),
 					.UsageBits = 
 						VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT 
 						| VkBufferUsageFlagBits::VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT 
@@ -67,6 +67,11 @@ namespace aZero::System
 		void ReloadShaderModules()
 		{
 			Compiler::CompilerSession::Desc sessionDesc {
+				.IncludePaths = std::vector<std::filesystem::path>(
+				{
+						std::filesystem::path(std::string(ENGINE_SHADER_DIRECTORY) + "/core_shaders/")
+				}
+				),
 				.CompilerOptions = std::vector<slang::CompilerOptionEntry>({
 				{
 					slang::CompilerOptionName::EmitSpirvDirectly,
@@ -84,9 +89,18 @@ namespace aZero::System
 			};
 
 			m_Session = m_diCompiler->CreateSession(sessionDesc).value();
-			m_TaskShader = m_Session.LoadModule(std::string(ENGINE_SHADER_DIRECTORY) + "/core_shaders/Geo_TaskShader.slang").value();
-			m_MeshShader = m_Session.LoadModule(std::string(ENGINE_SHADER_DIRECTORY) + "/core_shaders/Geo_MeshShader.slang").value();
-			m_FragmentShader = m_Session.LoadModule(std::string(ENGINE_SHADER_DIRECTORY) + "/core_shaders/Geo_FragmentShader.slang").value();
+			auto resTS = m_Session.LoadModule(std::string(ENGINE_SHADER_DIRECTORY) + "/core_shaders/mesh_draw_pipeline/TaskShader.slang");
+			auto resMS = m_Session.LoadModule(std::string(ENGINE_SHADER_DIRECTORY) + "/core_shaders/mesh_draw_pipeline/MeshShader.slang");
+			auto resFS = m_Session.LoadModule(std::string(ENGINE_SHADER_DIRECTORY) + "/core_shaders/mesh_draw_pipeline/FragmentShader.slang");
+
+			if (resTS.has_value() && resMS.has_value() && resFS.has_value())
+			{
+				// todo Recompile materials and if one fails we exit. Else ->
+
+				m_TaskShader = resTS.value();
+				m_MeshShader = resMS.value();
+				m_FragmentShader = resFS.value();
+			}
 		}
 
 		std::optional<std::reference_wrapper<Asset::MaterialType>> CreateMaterial(const std::string& name, const Asset::MaterialDefinition& definition)
@@ -212,75 +226,8 @@ namespace aZero::System
 		const RenderAPI::Buffer& GetMaterialInstanceCounterBuffer() const { return m_MaterialInstanceCounterBuffer; }
 
 		// Allocate empty vector with zeroed elements for use with counting num per material type when rendering a scene etc
-		std::vector<MaterialIndirectCounter> CreateVectorForMaterialTypeCount() const {
-			return std::vector<MaterialIndirectCounter>(m_MaterialTypeIndexList.GetMax(), 0);
-		}
-
-		void PrepareUpdateAtomicCounterBuffer(Renderer::FrameAllocator& allocator, const std::vector<MaterialIndirectCounter>& counts)
-		{
-			if (counts.size() > m_MaterialInstanceCounterBuffer.GetDesc().Size / sizeof(MaterialIndirectCounter))
-			{
-				// todo Handle if counts exceed the buffer size
-				throw;
-			}
-
-			std::vector<MaterialIndirectCounter> offsets(counts.size());
-			std::exclusive_scan(counts.cbegin(), counts.cend(), offsets.begin(), 0);
-			allocator.Allocate(offsets, m_MaterialInstanceCounterBuffer, 0);
-		}
-
-		void RecordPasses(RenderAPI::CommandBuffer& commandBuffer)
-		{
-			// todo Handle order for ex. transparent materials
-			for (uint32_t i = 0; i < m_Passes.size(); i++)
-			{
-				auto& pass = m_Passes[i];
-				// todo Sort cameras by order and by color and depth targets
-				// todo For each camera in the scene with different color and/or depth targets
-				pass.Render(commandBuffer,
-					Pipeline::RenderPass::RenderDesc{
-						/*.ColorTargets=camera color target,
-						.DepthTarget=if depth -> get camera depth stencil,
-						.RenderWidth=camera viewport etc,
-						.RenderHeight=camera viewport etc,
-						.DescriptorSets= texture set,*/
-						.Callback = [&](RenderAPI::CommandBuffer& commandBuffer, aZero::Pipeline::RenderPass& pass) {
-
-						// todo For each camera in the list of cameras with the same targets
-						/*VkViewport vp{
-							.x = 0.f,
-							.y = 0.f,
-							.width = static_cast<float>(window.GetClientDimensions()[0]),
-							.height = static_cast<float>(window.GetClientDimensions()[1]),
-							.minDepth = 0.0f,
-							.maxDepth = 1.0f
-						};
-						VkRect2D scissor{.extent{.width = static_cast<uint32_t>(window.GetClientDimensions()[0]), .height = static_cast<uint32_t>(window.GetClientDimensions()[1]) } };
-						cb.SetScizzorRectsAndViewports({ vp }, { scissor });*/
-
-						/*aZero::Rendering::GeoDrawPushConstants constants{
-							 .CameraBufferPtr = vars.cameraBuffer.GetDeviceAddress().value() + frameIndex * sizeof(aZero::Rendering::CameraData),
-							 .MeshletBoundBufferPtr = vars.meshletBoundsBuffer.GetDeviceAddress().value(),
-							 .MaterialBufferPtr = vars.materialBuffer.GetDeviceAddress().value(),
-							 .InstanceDataBufferPtr = vars.instanceDataBuffer.GetDeviceAddress().value(),
-							 .DrawMetadataBufferPtr = vars.drawMetadataBuffer.GetDeviceAddress().value(),
-							 .RenderMode = 0u
-						};
-						cb.SetPushConstants(pass.GetPushConstantBlock("Constants"), constants);*/
-
-						RenderAPI::CommandBuffer::ExecuteIndirectDesc exeDesc{
-							//.IndirectArgumentBuffer = &vars.iaBuffer,
-							//.IndirectArgumentBufferOffset = (uint32_t)(sizeof(aZero::Rendering::IndirectArgumentCounter)), // Starts after count
-							//.IndirectArgumentStride = (uint32_t)(sizeof(uint32_t) * 3),
-							.CountBuffer = &m_MaterialInstanceCounterBuffer,
-							.CountBufferOffset = (uint32_t)(sizeof(MaterialIndirectCounter) * i),
-							//.MaxDraws = 2
-						};
-						commandBuffer.ExecuteIndirectMeshTasksCount(exeDesc);
-					}
-					}
-				);
-			}
+		std::vector<uint32_t> CreateVectorForMaterialTypeCount() const {
+			return std::vector<uint32_t>(m_MaterialTypeIndexList.GetMax(), 0);
 		}
 
 		bool CreatePipeline(MaterialAllocationInfo& allocationInfo, Pipeline::RenderPass& inoutPass)
@@ -312,7 +259,7 @@ namespace aZero::System
 			mspDesc.Program = &program;
 			mspDesc.DepthDesc = Pipeline::RenderPass::Desc::DepthStencil();
 			mspDesc.RenderTargetFormats = { VK_FORMAT_R8G8B8A8_SRGB };
-			mspDesc.RasterDesc.CullMode = VkCullModeFlagBits::VK_CULL_MODE_NONE;
+			mspDesc.RasterDesc.CullMode = VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT;
 			if (!inoutPass.Compile(mspDesc))
 			{
 				return false;

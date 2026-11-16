@@ -1,38 +1,25 @@
-#include "Geo_Pipeline_Structs.slang"
-
-struct IndirectArguments
-{
-    uint32_t GroupX;
-    uint32_t GroupY;
-    uint32_t GroupZ;
-};
-
-struct IndirectArgumentCounter
-{
-    uint32_t Count;
-    uint32_t Pad[3];
-};
+import Cross_Pipeline_Structs;
 
 [[vk::push_constant]]
-ConstantBuffer<InstanceCullPushConstants> Constants;
+ConstantBuffer<ComputeCullConstants> Constants;
 
-[numthreads(THREAD_COUNT_X, 1, 1)]
+[numthreads(g_ThreadCount, 1, 1)]
 void main(uint3 dtid : SV_DispatchThreadID)
 {
     if (dtid.x < Constants.InstanceCount)
     {
         InstanceCullData *instanceCullDataBuffer = (InstanceCullData *)Constants.InstanceCullDataBufferPtr;
         const InstanceCullData instanceCullData = instanceCullDataBuffer[dtid.x];
-
         CameraData *camera = (CameraData *)Constants.CameraBufferPtr;
         // if (camera.Frustum.Intersects(instanceCullData.WorldSpaceBounds, camera.ViewMatrix))
         {
-            IndirectArgumentCounter *indirectArgumentCounterBuffer = (IndirectArgumentCounter *)Constants.IndirectArgumentBufferPtr;
-            IndirectArguments *indirectArgumentsBuffer = (IndirectArguments *)(Constants.IndirectArgumentBufferPtr + sizeof(IndirectArgumentCounter));
+            uint32_t *indirectArgumentCounterBuffer = (uint32_t *)Constants.IndirectArgumentCounterBufferPtr;
+            MeshTaskIndirectArgs *indirectArgumentsBuffer = (MeshTaskIndirectArgs*)Constants.IndirectArgumentBufferPtr;
 
             uint meshInstanceIndex;
-            InterlockedAdd(indirectArgumentCounterBuffer[0].Count, 1, meshInstanceIndex);
-            indirectArgumentsBuffer[meshInstanceIndex].GroupX = (uint32_t)(ceil(instanceCullData.MeshletCount / (float) THREAD_COUNT_X));
+            // InterlockAdd the counter for the specific materialtype. The buffer value is initiated to the start offset of the materialtype.
+            InterlockedAdd(indirectArgumentCounterBuffer[instanceCullData.MaterialTypeIndex], 1, meshInstanceIndex);
+            indirectArgumentsBuffer[meshInstanceIndex].GroupX = (uint32_t)(ceil(instanceCullData.MeshletCount / (float)g_ThreadCount));
             indirectArgumentsBuffer[meshInstanceIndex].GroupY = 1;
             indirectArgumentsBuffer[meshInstanceIndex].GroupZ = 1;
 

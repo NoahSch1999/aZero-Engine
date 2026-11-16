@@ -500,7 +500,9 @@ namespace aZero::Compiler
                         binding.VkLayout.descriptorCount = modules[0]->m_diCore->GetVariadicDescriptorCount();
                         binding.HasVariableBinding = true;
 
-                        flags = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+                        flags = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+                            | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
+                            | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
                         hasVariableBinding = true;
                     }
 
@@ -510,6 +512,7 @@ namespace aZero::Compiler
 
                 VkDescriptorSetLayoutCreateInfo descLayoutTexCI{
                         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                        .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
                         .bindingCount = (uint32_t)bindings.size(),
                         .pBindings = bindings.data()
                 };
@@ -631,12 +634,14 @@ namespace aZero::Compiler
                 .profile{m_GlobalSession->findProfile("spirv_1_4")}}
             }) };
 
-            std::vector<const char*> pathPtrs;
+            std::vector<std::string> pathStrings; // We need this since pathPtrs will be dangling otherwise...
+            std::vector<const char*> pathPtrs; 
             pathPtrs.reserve(desc.IncludePaths.size());
 
             for (const auto& path : desc.IncludePaths)
             {
-                pathPtrs.push_back(path.generic_string().c_str());
+                pathStrings.push_back(path.generic_string());
+                pathPtrs.push_back(pathStrings.back().c_str());
             }
 
             std::vector<slang::PreprocessorMacroDesc> preMacros;

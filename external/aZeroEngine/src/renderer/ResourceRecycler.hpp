@@ -9,6 +9,7 @@ namespace aZero::Renderer
 	{
 		VkBuffer Buffer;
 		VmaAllocation Allocation;
+		std::unique_ptr<VkBufferMemoryBarrier2> Barrier;
 	};
 
 	struct RecycledImage
@@ -22,6 +23,14 @@ namespace aZero::Renderer
 	public:
 
 		ResourceRecycler() = default;
+		~ResourceRecycler()
+		{
+			for (uint32_t i = 0; i < m_Buffers.size(); i++)
+			{
+				this->Clear(i);
+			}
+		}
+
 		ResourceRecycler(RenderAPI::Core& core, uint32_t framesInFlight, uint32_t startIndex)
 		{
 			m_diCore = &core;

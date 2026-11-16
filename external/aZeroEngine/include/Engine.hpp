@@ -45,8 +45,5 @@ namespace aZero
 		std::unique_ptr<Audio::AudioEngine> m_AudioEngine;
 		std::unique_ptr<Physics::PhysicsEngine> m_PhysicsEngine;
 		std::unique_ptr<Renderer::Renderer> m_Renderer;
-		System::MeshSystem m_MeshSystem;
-		System::TextureSystem m_TextureSystem;
-		System::MaterialSystem m_MaterialSystem;
 	};
 }

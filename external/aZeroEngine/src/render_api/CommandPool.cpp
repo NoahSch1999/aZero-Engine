@@ -90,12 +90,15 @@ void aZero::RenderAPI::CommandBuffer::Copy(const BufferToImageCopyDesc& copyDesc
 
 void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Buffer& srcBuffer, uint32_t srcOffset, const RenderAPI::Buffer& dstBuffer, uint32_t dstOffset, uint32_t size) const
 {
-    VkBufferCopy cpy{
-        .srcOffset = srcOffset,
-        .dstOffset = dstOffset,
-        .size = size
-    };
-    vkCmdCopyBuffer(m_CommandBuffer, srcBuffer.Get(), dstBuffer.Get(), 1, &cpy);
+    if (size > 0)
+    {
+        VkBufferCopy cpy{
+            .srcOffset = srcOffset,
+            .dstOffset = dstOffset,
+            .size = size
+        };
+        vkCmdCopyBuffer(m_CommandBuffer, srcBuffer.Get(), dstBuffer.Get(), 1, &cpy);
+    }
 }
 
 void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Buffer& srcBuffer, const RenderAPI::Buffer& dstBuffer, const std::vector<VkBufferCopy>& copyRegions) const

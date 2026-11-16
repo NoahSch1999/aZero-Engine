@@ -108,7 +108,7 @@ namespace aZero::Pipeline
 
             DepthStencilTarget DepthTarget;
 
-            uint32_t RenderWidth = 0u, RenderHeight = 0u;
+            VkRect2D RenderRect;
 
             std::vector<RenderAPI::DescriptorSet*> DescriptorSets;
 
@@ -146,6 +146,7 @@ namespace aZero::Pipeline
             desc.Callback(commandBuffer, *this);
 
             vkCmdDispatch(commandBuffer.Get(), desc.GroupX, desc.GroupY, desc.GroupZ);
+            return true;
         }
 
         bool Render(RenderAPI::CommandBuffer& commandBuffer, const RenderDesc& renderDesc)
@@ -168,7 +169,7 @@ namespace aZero::Pipeline
                 return false;
             }
 
-            if (renderDesc.RenderWidth == 0u || renderDesc.RenderHeight == 0u)
+            if (renderDesc.RenderRect.extent.width == 0u || renderDesc.RenderRect.extent.height == 0u)
             {
                 std::cout << "RenderDesc has either RenderWidth or RenderHeight set to 0.\n";
                 return false;
@@ -176,7 +177,7 @@ namespace aZero::Pipeline
 
             VkRenderingInfo renderingInfo{
                 .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                .renderArea{.extent{.width = renderDesc.RenderWidth, .height = renderDesc.RenderHeight }},
+                .renderArea = renderDesc.RenderRect,
                 .layerCount = 1
             };
 
@@ -466,7 +467,7 @@ namespace aZero::Pipeline
             };
 
             VkPipelineRasterizationStateCreateInfo rasterizationState = desc.RasterDesc.ToPipelineCI();
-
+            //rasterizationState.frontFace = VK_FRONT_FACE_CLOCKWISE;
             // todo Impl support
             std::vector<VkPipelineColorBlendAttachmentState> blendAttachments(desc.RenderTargetFormats.size());
             for (int i = 0; i < blendAttachments.size(); i++) {

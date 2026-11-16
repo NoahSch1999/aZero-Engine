@@ -24,9 +24,9 @@ namespace aZero::Asset
 				return;
 			}
 
-			if (auto iter = m_diMaterial->GetDefinition().Parameters.find(name); iter != m_diMaterial->GetDefinition().Parameters.end())
+			if (auto param = m_diMaterial->GetDefinition().FindParameter(name))
 			{
-				const std::size_t paramSize = iter->second.GetSize();
+				const std::size_t paramSize = param->GetSize();
 				if (sizeof(data) <= paramSize)
 				{
 					if (auto iter2 = m_diMaterial->GetParameterSizeInfo().Offsets.find(name); iter2 != m_diMaterial->GetParameterSizeInfo().Offsets.end())
@@ -46,14 +46,15 @@ namespace aZero::Asset
 				return {};
 			}
 
-			if (auto iter = m_diMaterial->GetDefinition().Parameters.find(name); iter != m_diMaterial->GetDefinition().Parameters.end())
+			if (auto param = m_diMaterial->GetDefinition().FindParameter(name))
 			{
-				if (iter->second.GetSize() == sizeof(T))
+				if (param->GetSize() == sizeof(T))
 				{
 					if (auto iter2 = m_diMaterial->GetParameterSizeInfo().Offsets.find(name); iter2 != m_diMaterial->GetParameterSizeInfo().Offsets.end())
 					{
-						T* data = reinterpret_cast<T*>((m_Data.data() + iter2->second));
-						return *data;
+						T data;
+						std::memcpy(&data, m_Data.data() + iter2->second, sizeof(data));
+						return data;
 					}
 				}
 			}

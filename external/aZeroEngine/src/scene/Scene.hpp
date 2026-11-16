@@ -1,25 +1,26 @@
 #pragma once
 #include <bitset>
 #include <filesystem>
-#include "renderer/Renderer.hpp"
 #include <fastgltf/core.hpp>
 #include <fastgltf/types.hpp>
 #include <fastgltf/tools.hpp>
+#include <flecs.h>
+#include "components/TransformComponents.hpp"
+#include "components/MeshComponent.hpp"
+#include "components/TriggerbodyComponent.hpp"
+#include "components/RigidbodyComponent.hpp"
+#include "components/LightComponents.hpp"
+#include "components/CameraComponent.hpp"
+#include "physics/PhysicsWorld.hpp"
+#include "misc/LinearAllocator.hpp"
 
 namespace aZero
 {
 	namespace Physics { class PhysicsEngine; }
 	namespace Rendering { class WireframeRenderer; }
 	namespace RenderAPI { class CommandList; }
-
-	namespace Asset
-	{
-		template<typename T, typename... Ts>
-		class AssetManagerT;
-
-		template<typename T>
-		using AssetManager = aZero::Asset::AssetManagerT<T, aZero::Asset::Mesh, aZero::Asset::Material, aZero::Asset::Texture>;
-	}
+	namespace Component{ class StaticComponent{}; }
+	namespace System { class MeshSystem; class MaterialSystem; class TextureSystem; }
 
 	namespace Scene
 	{
@@ -27,18 +28,19 @@ namespace aZero
 		{
 			uint32_t MeshCount;
 			uint32_t PointLightCount, SpotLightCount, DirectionalLightCount;
+			std::vector<const aZero::Component::CameraComponent*> Cameras;
 		};
 
 		struct SceneRenderData
 		{
 			// todo Make buffers resizable
-			aZero::RenderAPI::Buffer ObjectCullDataBuffer;
+			aZero::RenderAPI::Buffer InstanceCullDataBuffer;
 			aZero::RenderAPI::Buffer InstanceBuffer;
 			aZero::RenderAPI::Buffer CameraBuffer;
 			aZero::RenderAPI::Buffer PointLightBuffer;
 			aZero::RenderAPI::Buffer SpotLightBuffer;
 			aZero::RenderAPI::Buffer DirectionalLightBuffer;
-			std::vector<D3D12_VIEWPORT> CameraRSData;
+			std::vector<Component::CameraComponent*> Cameras;
 		};
 
 		using SceneID = uint32_t;
@@ -48,23 +50,27 @@ namespace aZero
 		public:
 			Scene();
 			Scene(Physics::PhysicsEngine& physicsEngine);
+
+			// todo Impl move-ops etc...
+
 			~Scene();
 
-			bool LoadGltf(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager);
+			bool LoadGltf(const std::filesystem::path& path);
 
 			flecs::world& GetWorld() { return m_World; }
 			SceneID GetSceneID() const { return m_SceneID; }
 			flecs::query<> GetRootEntityQuery() const { return m_RootEntityQuery; }
+			bool LoadGltf(const std::filesystem::path& path, System::MeshSystem& meshSystem, System::MaterialSystem& matSystem, System::TextureSystem& tSystem);
 
 			flecs::entity GetStaticMeshPrefab() const { return m_StaticMeshPrefab; }
 			flecs::entity GetCameraPrefab() const { return m_CameraPrefab; }
-			flecs::query<Component::Camera, Component::Position, Component::Rotation> GetCameraQuery() const { return m_CameraQuery; }
-			flecs::query<const Component::Mesh, const Component::Position, const Component::Rotation, const Component::Scale> GetStaticMeshQuery() const { return m_Static_Mesh_Query; }
-			flecs::query<const Component::Mesh, const Component::Position, const Component::Rotation, const Component::Scale> GetDynamicMeshQuery() const { return m_Dynamic_Mesh_Query; }
-			flecs::query<Component::Rigidbody, Component::Position, Component::Rotation> GetRigidbodyQuery() const { return m_ApplyPhysicsQuery; }
-			flecs::query<Component::Triggerbody, Component::Position> GetTriggerbodyQuery() const { return m_TriggerbodyQuery; }
+			flecs::query<const Component::CameraComponent, const Component::PositionComponent, const Component::RotationComponent> GetCameraQuery() const { return m_CameraQuery; }
+			flecs::query<const Component::MeshComponent, const Component::PositionComponent, const Component::RotationComponent, const Component::ScaleComponent> GetStaticMeshQuery() const { return m_Static_Mesh_Query; }
+			flecs::query<const Component::MeshComponent, const Component::PositionComponent, const Component::RotationComponent, const Component::ScaleComponent> GetDynamicMeshQuery() const { return m_Dynamic_Mesh_Query; }
+			flecs::query<Component::RigidbodyComponent, Component::PositionComponent, Component::RotationComponent> GetRigidbodyQuery() const { return m_ApplyPhysicsQuery; }
+			flecs::query<Component::TriggerbodyComponent, Component::PositionComponent> GetTriggerbodyQuery() const { return m_TriggerbodyQuery; }
 
-			std::tuple<SceneRenderDataFrameInfo, std::reference_wrapper<SceneRenderData>> GetRenderData(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, aZero::RenderAPI::CommandList& cmdList);
+			std::tuple<SceneRenderDataFrameInfo, std::reference_wrapper<SceneRenderData>> CreateRenderData(RenderAPI::Core& core, Renderer::ResourceRecycler& recycler, aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, aZero::RenderAPI::CommandBuffer& commandBuffer);
 
 			bool HasPhysics() const { return m_PhysicsWorld.get() != nullptr; }
 			void ApplyPhysics();
@@ -76,28 +82,26 @@ namespace aZero
 
 			const std::unordered_map<uint32_t, flecs::entity_t>& GetBodyID_To_EntityID_Map() const { return m_BodyID_To_EntityID; } // This name...
 
-			// This is specialized to define custom behavior on asset erase on a per-asset level
-			template<typename AssetType>
-			void OnAssetErased(const AssetType& asset);
-
 		private:
 			void Init();
 
-			void RebuildStaticMeshes(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandList& cmdList);
-			uint32_t UploadDynamicMeshes(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandList& cmdList);
+			void UploadStaticMeshes(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& commandBuffer);
+			uint32_t UploadDynamicMeshes(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& commandBuffer);
 
-			void RebuildStaticLights(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandList& cmdList);
-			std::tuple<uint32_t, uint32_t, uint32_t> UploadDynamicLights(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandList& cmdList);
+			void UploadStaticLights(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& cmdList);
+			std::tuple<uint32_t, uint32_t, uint32_t> UploadDynamicLights(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& cmdList);
+
+			std::vector<const Component::CameraComponent*> UploadCameras(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& cmdList);
 
 			void ResolveCollisionEvents();
-			void RegisterToPhysics(flecs::entity entity, Physics::Body& body, JPH::BodyCreationSettings& bodySettings);
+			bool RegisterToPhysics(flecs::entity entity, Physics::Body& body, JPH::BodyCreationSettings& bodySettings);
 			void UnregisterFromPhysics(flecs::entity entity, Physics::Body& body);
 
-			std::unordered_map<uint32_t, std::string> LoadGltf_Meshes(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset);
-			std::unordered_map<uint32_t, std::string> LoadGltf_Materials(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset, const std::unordered_map<uint32_t, std::string>& imageIndexToName);
+			std::unordered_map<uint32_t, std::string> LoadGltf_Meshes(const std::filesystem::path& path, System::MeshSystem& mSystem, fastgltf::Asset* asset);
+			//std::unordered_map<uint32_t, std::string> LoadGltf_Materials(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset, const std::unordered_map<uint32_t, std::string>& imageIndexToName);
 
-			// Currently only supports images
-			std::unordered_map<uint32_t, std::string> LoadGltf_Textures(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset);
+			//// Currently only supports images
+			//std::unordered_map<uint32_t, std::string> LoadGltf_Textures(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset);
 
 			flecs::world m_World;
 			flecs::observer m_Rigidbody_OnSet_Observer;
@@ -108,21 +112,21 @@ namespace aZero
 
 			flecs::query<> m_RootEntityQuery;
 
-			flecs::query<const Component::Mesh, const Component::Position, const Component::Rotation, const Component::Scale> m_Static_Mesh_Query;
-			flecs::query<const Component::Mesh, const Component::Position, const Component::Rotation, const Component::Scale> m_Dynamic_Mesh_Query;
+			flecs::query<const Component::MeshComponent, const Component::PositionComponent, const Component::RotationComponent, const Component::ScaleComponent> m_Static_Mesh_Query;
+			flecs::query<const Component::MeshComponent, const Component::PositionComponent, const Component::RotationComponent, const Component::ScaleComponent> m_Dynamic_Mesh_Query;
 
-			flecs::query<const Component::PointLight, const Component::Position> m_Static_PointLight_Query;
-			flecs::query<const Component::PointLight, const Component::Position> m_Dynamic_PointLight_Query;
+			flecs::query<const Component::PointLightComponent, const Component::PositionComponent> m_Static_PointLight_Query;
+			flecs::query<const Component::PointLightComponent, const Component::PositionComponent> m_Dynamic_PointLight_Query;
 
-			flecs::query<const Component::SpotLight, const Component::Position, const Component::Rotation> m_Static_SpotLight_Query;
-			flecs::query<const Component::SpotLight, const Component::Position, const Component::Rotation> m_Dynamic_SpotLight_Query;
+			flecs::query<const Component::SpotLightComponent, const Component::PositionComponent, const Component::RotationComponent> m_Static_SpotLight_Query;
+			flecs::query<const Component::SpotLightComponent, const Component::PositionComponent, const Component::RotationComponent> m_Dynamic_SpotLight_Query;
 
-			flecs::query<const Component::DirectionalLight, const Component::Rotation> m_Static_DirectionalLight_Query;
-			flecs::query<const Component::DirectionalLight, const Component::Rotation> m_Dynamic_DirectionalLight_Query;
+			flecs::query<const Component::DirectionalLightComponent, const Component::RotationComponent> m_Static_DirectionalLight_Query;
+			flecs::query<const Component::DirectionalLightComponent, const Component::RotationComponent> m_Dynamic_DirectionalLight_Query;
 
-			flecs::query<Component::Camera, Component::Position, Component::Rotation> m_CameraQuery;
-			flecs::query<Component::Rigidbody, Component::Position, Component::Rotation> m_ApplyPhysicsQuery;
-			flecs::query<Component::Triggerbody, Component::Position> m_TriggerbodyQuery;
+			flecs::query<const Component::CameraComponent, const Component::PositionComponent, const Component::RotationComponent> m_CameraQuery;
+			flecs::query<Component::RigidbodyComponent, Component::PositionComponent, Component::RotationComponent> m_ApplyPhysicsQuery;
+			flecs::query<Component::TriggerbodyComponent, Component::PositionComponent> m_TriggerbodyQuery;
 
 			flecs::entity m_StaticMeshPrefab;
 			flecs::entity m_RigidbodyStaticMeshPrefab;
@@ -135,8 +139,7 @@ namespace aZero
 			static inline std::atomic<SceneID> m_IncrementingID = 0;
 
 			SceneRenderData m_RenderData;
-			uint32_t m_NumUniqueStaticMeshes = 0;
-			uint32_t m_NumUniqueStaticInstanceData = 0;
+			uint32_t m_NumStaticInstances = 0;
 
 			uint32_t m_NumStaticPointLights = 0;
 			uint32_t m_NumStaticSpotLights = 0;
@@ -145,41 +148,5 @@ namespace aZero
 			bool m_ShouldRebuildStaticMeshes = true;
 			bool m_ShouldRebuildStaticLights = true;
 		};
-
-		template<typename AssetType>
-		void Scene::OnAssetErased(const AssetType&) { }
-
-		template<>
-		inline void Scene::OnAssetErased(const Asset::Mesh& mesh)
-		{
-			m_World.defer_begin();
-			m_World.query<Component::Mesh>().each(
-				[mesh](flecs::entity entity, Component::Mesh& meshComponent) {
-					if (meshComponent.m_MeshID == mesh.GetRenderRef().m_MeshletGlobalOffset)
-					{
-						entity.remove<Component::Mesh>();
-					}
-				}
-			);
-			m_World.defer_end();
-		}
-
-		template<>
-		inline void Scene::OnAssetErased(const Asset::Material& material)
-		{
-			m_World.defer_begin();
-			m_World.query<Component::Mesh>().each(
-				[material](flecs::entity entity, Component::Mesh& meshComponent) {
-					for (auto& submesh : meshComponent.m_Submeshes)
-					{
-						if (submesh.m_MaterialID == material.GetRenderRef().MaterialIndex)
-						{
-							// todo Assign the mesh the default material
-						}
-					}
-				}
-			);
-			m_World.defer_end();
-		}
 	}
 }

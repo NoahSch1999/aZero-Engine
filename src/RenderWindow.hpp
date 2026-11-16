@@ -49,11 +49,11 @@ private:
 		{
 			if (event.key.key == SDLK_1)
 			{
-				m_diRenderer->Test(0, 0, 1.f);
+
 			}
 			else if (event.key.key == SDLK_2)
 			{
-				m_diRenderer->Test(0.f, 1.f, 0.f);
+
 			}
 			
 		}

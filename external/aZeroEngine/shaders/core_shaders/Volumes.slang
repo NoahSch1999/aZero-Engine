@@ -1,13 +1,12 @@
-#ifndef VOLUMES_INCLUDED
-#define VOLUMES_INCLUDED
+module Volumes;
 
-struct BoundingSphere
+public struct BoundingSphere
 {
-    float3 Position;
-    float Radius;
+    public float3 Position;
+    public float Radius;
 };
 
-BoundingSphere CreateBoundingSphere(float3 Position, float Radius) 
+public BoundingSphere CreateBoundingSphere(float3 Position, float Radius) 
 {
     BoundingSphere sphere;
     sphere.Position = Position;
@@ -15,21 +14,21 @@ BoundingSphere CreateBoundingSphere(float3 Position, float Radius)
     return sphere;
 }
 
-struct BoundingFrustum
+public struct BoundingFrustum
 {
-    float4 Rotation;
+    public float4 Rotation;
     
-    float3 Position;
-    float RightSlope;
+    public float3 Position;
+    public float RightSlope;
     
-    float LeftSlope;
-    float TopSlope;
-    float BottomSlope;
-    float Near;
-    
-    float Far;
-    
-    bool Intersects(BoundingSphere sphere, float4x4 viewMatrix)
+    public float LeftSlope;
+    public float TopSlope;
+    public float BottomSlope;
+    public float Near;
+
+    public float Far;
+
+    public bool Intersects(BoundingSphere sphere, float4x4 viewMatrix)
     {
         float4 planes[6];
         planes[0] = float4(0.0f, 0.0f, -1.0f, Near);
@@ -60,8 +59,8 @@ struct BoundingFrustum
         
         return true;
     }
-    
-    bool Intersects(BoundingSphere sphere)
+
+    public bool Intersects(BoundingSphere sphere)
     {
         float4 planes[6];
         planes[0] = float4(0.0f, 0.0f, -1.0f, Near);
@@ -91,7 +90,7 @@ struct BoundingFrustum
     }
 };
 
-BoundingFrustum CreateFrustum(float3 position, float4 rotation, float rightSlope, float leftSlope, float topSlope, float bottomSlope, float near, float far)
+public BoundingFrustum CreateFrustum(float3 position, float4 rotation, float rightSlope, float leftSlope, float topSlope, float bottomSlope, float near, float far)
 {
     BoundingFrustum frustum;
     frustum.Position = position;
@@ -104,4 +103,3 @@ BoundingFrustum CreateFrustum(float3 position, float4 rotation, float rightSlope
     frustum.Far = far;
     return frustum;
 }
-#endif

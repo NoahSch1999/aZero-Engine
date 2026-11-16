@@ -85,6 +85,8 @@ namespace aZero::RenderAPI
                 .dstAccessMask = VK_ACCESS_2_NONE,
                 .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
                 .newLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .image = m_Image,
                 .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_NONE, .levelCount = 1, .layerCount = 1 }
                 };
@@ -116,7 +118,13 @@ namespace aZero::RenderAPI
             VkPipelineStageFlags2 DstStageMask;
             VkAccessFlags2 DstAccessMask;
             VkImageLayout NewLayout;
-            VkImageSubresourceRange SubresourceRange;
+            VkImageSubresourceRange SubresourceRange = { 
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1 
+            };
+            uint32_t DstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         };
 
         void Transition(const TransitionDesc& desc)
@@ -124,6 +132,7 @@ namespace aZero::RenderAPI
             m_LastBarrier.srcStageMask = m_LastBarrier.dstStageMask;
             m_LastBarrier.srcAccessMask = m_LastBarrier.dstAccessMask;
             m_LastBarrier.oldLayout = m_LastBarrier.newLayout;
+            m_LastBarrier.srcQueueFamilyIndex = m_LastBarrier.dstQueueFamilyIndex;
 
             m_LastBarrier.dstStageMask = desc.DstStageMask;
             m_LastBarrier.dstAccessMask = desc.DstAccessMask;
@@ -159,17 +168,6 @@ namespace aZero::RenderAPI
                 .SubresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = (uint32_t)uploadDesc.MipOffsets.size(), .layerCount = 1}
             });
             commandBuffer.Barrier({}, { m_LastBarrier }, {});
-
-            /*commandBuffer.StopRecording();
-
-            aZero::RenderAPI::CommandQueue::SubmitDesc submitDesc{
-            .CommandBuffers = { &commandBuffer },
-            .OnCompletionFence = &fenceOneTime
-            };
-
-            commandQueue.SubmitCommandBuffers(submitDesc);
-
-            fenceOneTime.WaitFor();*/
         }
 
         VkImage Get() const { return m_Image; }

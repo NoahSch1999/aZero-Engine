@@ -109,10 +109,12 @@ namespace aZero::RenderAPI
                     }
                 }
 
-                m_LastBarrier = {
-                    .dstStageMask = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_NONE,
-                    .dstAccessMask = VkAccessFlagBits::VK_ACCESS_NONE
-                };
+                m_LastBarrier = std::make_unique< VkBufferMemoryBarrier2>();
+
+                m_LastBarrier->sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                m_LastBarrier->dstStageMask = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_NONE;
+                m_LastBarrier->dstAccessMask = VkAccessFlagBits::VK_ACCESS_NONE;
+                m_LastBarrier->dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
                 m_Desc = desc;
                 m_diCore = &core;
@@ -142,28 +144,31 @@ namespace aZero::RenderAPI
         {
             VkPipelineStageFlags2 DstStageMask;
             VkAccessFlags2 DstAccessMask;
-            uint32_t Offset, Size;
+            uint32_t Offset;
+            uint64_t Size;
+            uint32_t DstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         };
 
         void Transition(const TransitionDesc& desc)
         {
-            m_LastBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
-            m_LastBarrier.srcStageMask = m_LastBarrier.dstStageMask;
-            m_LastBarrier.srcAccessMask = m_LastBarrier.dstAccessMask;
+            m_LastBarrier->srcStageMask = m_LastBarrier->dstStageMask;
+            m_LastBarrier->srcAccessMask = m_LastBarrier->dstAccessMask;
+            m_LastBarrier->srcQueueFamilyIndex = m_LastBarrier->dstQueueFamilyIndex;
 
-            m_LastBarrier.dstStageMask = desc.DstStageMask;
-            m_LastBarrier.dstAccessMask = desc.DstAccessMask;
-            m_LastBarrier.buffer = m_Buffer;
-            m_LastBarrier.offset = desc.Offset;
-            m_LastBarrier.size = desc.Size;
+            m_LastBarrier->dstStageMask = desc.DstStageMask;
+            m_LastBarrier->dstAccessMask = desc.DstAccessMask;
+            m_LastBarrier->buffer = m_Buffer;
+            m_LastBarrier->offset = desc.Offset;
+            m_LastBarrier->size = desc.Size;
         }
 
         VkBuffer Get() const { return m_Buffer; }
         Desc GetDesc() const { return m_Desc; }
         void* GetMappedPtr() const { return m_AllocationInfo.pMappedData; }
         std::optional<VkDeviceAddress> GetDeviceAddress() const { return m_DeviceAddress; }
-        const VkBufferMemoryBarrier2& GetTransition() const { return m_LastBarrier; }
-
+        const VkBufferMemoryBarrier2& GetTransition() const { return *m_LastBarrier.get(); }
+        VkBufferMemoryBarrier2* GetTransitionPtr() const { return m_LastBarrier.get(); }
+        bool IsInitialized() const { return m_diCore != nullptr; }
     private:
         Core* m_diCore = nullptr;
         VkBuffer m_Buffer;
@@ -171,6 +176,8 @@ namespace aZero::RenderAPI
         VmaAllocationInfo m_AllocationInfo;
         std::optional<VkDeviceAddress> m_DeviceAddress;
         Desc m_Desc;
-        VkBufferMemoryBarrier2 m_LastBarrier;
+        
+        // We make this a pointer so that we can query the last barrier when it need to outlive the RenderAPI::Buffer object (ex. when we recycle the RenderAPI::Buffer)
+        std::unique_ptr<VkBufferMemoryBarrier2> m_LastBarrier;
     };
 }

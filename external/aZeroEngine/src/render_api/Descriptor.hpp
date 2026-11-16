@@ -146,7 +146,11 @@ namespace aZero::RenderAPI
 
         DescriptorSet CreateDescriptorSet(const DescriptorSet::Desc& desc)
         {
-            VkDescriptorBindingFlags descVariableFlag{ VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT };
+            VkDescriptorBindingFlags descVariableFlag{ VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT 
+                | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 
+                | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT 
+                | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+            };
             VkDescriptorSetLayoutBindingFlagsCreateInfo descBindingFlags{
                 .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
                 .bindingCount = 1,
@@ -155,11 +159,12 @@ namespace aZero::RenderAPI
             VkDescriptorSetLayoutBinding descLayoutBindingTex{
                 .descriptorType = desc.Type,
                 .descriptorCount = desc.MaxDescriptorCount,
-                .stageFlags = desc.ShaderStages/*VK_SHADER_STAGE_FRAGMENT_BIT*/
+                .stageFlags = desc.ShaderStages
             };
             VkDescriptorSetLayoutCreateInfo descLayoutTexCI{
                 .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                 .pNext = &descBindingFlags,
+                .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
                 .bindingCount = descBindingFlags.bindingCount,
                 .pBindings = &descLayoutBindingTex
             };
@@ -198,6 +203,7 @@ namespace aZero::RenderAPI
 
             VkDescriptorPoolCreateInfo descPoolCI{
                 .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
                 .maxSets = desc.MaxSets,
                 .poolSizeCount = static_cast<uint32_t>(sets.size()),
                 .pPoolSizes = sets.data()

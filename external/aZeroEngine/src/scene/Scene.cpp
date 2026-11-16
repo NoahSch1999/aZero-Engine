@@ -1,37 +1,47 @@
 #include "Scene.hpp"
 #include "physics/PhysicsEngine.hpp"
-#include "renderer/WireframeRenderer.hpp"
-#include "renderer/GPU_Structs.hpp"
-#include "misc/HelperFunctions.hpp"
-#include "assets/AssetManager.hpp"
+#include "renderer/mesh_draw_pipeline/Mesh_Draw_Structs.hpp"
+#include "misc/Helpers.hpp"
+#include "misc/Maths.hpp"
+#include "renderer/system/MeshSystem.hpp"
+#include "renderer/system/MaterialSystem.hpp"
+#include "renderer/system/TextureSystem.hpp"
 
 #include "misc/ThreadPool.hpp"
+#include <glm/gtx/euler_angles.hpp>
+
+glm::mat4x4 CreateWorldMatrix(const glm::vec3 position, const glm::vec3 rotation, const glm::vec3 scale)
+{
+	glm::mat4 T = glm::translate(glm::mat4(1.0f), position);
+	glm::mat4 R = glm::eulerAngleYXZ(glm::radians(rotation.y), glm::radians(rotation.x), glm::radians(rotation.z));
+	glm::mat4 S = glm::scale(glm::mat4(1.0f), scale);
+	return T * R * S;
+}
 
 // todo Test so that submeshes work as expected
-void WriteRenderFormat(aZero::Rendering::GPU_Struct::ObjectCullData* pObjCull, aZero::Rendering::GPU_Struct::InstanceData* pInstance,
-	const aZero::Component::Mesh& mesh, const aZero::Component::Position& position, const aZero::Component::Rotation& rotation, const aZero::Component::Scale& scale, uint32_t& perObjectIndex, uint32_t& instanceDataIndex, uint32_t baseOffsetInstanceIndex)
+void WriteRenderFormat(aZero::GPUStruct::InstanceCullData* pObjCull, aZero::GPUStruct::InstanceData* pInstance,
+	const aZero::Component::MeshComponent& mesh, const aZero::Component::PositionComponent& position, const aZero::Component::RotationComponent& rotation, const aZero::Component::ScaleComponent& scale, uint32_t& instanceDataIndex, uint32_t baseOffsetInstanceIndex)
 {
 	using namespace aZero::Rendering;
-	GPU_Struct::InstanceData instanceData;
-	instanceData.Transform = DXM::Matrix::CreateScale(scale) * DXM::Matrix::CreateFromYawPitchRoll(rotation) * DXM::Matrix::CreateTranslation(position);
-	*(pInstance + instanceDataIndex) = instanceData;
+	aZero::GPUStruct::InstanceData instanceData;
+	instanceData.WorldMatrix = CreateWorldMatrix(position.Position, rotation.Rotation, scale.Scale);
 
 	for (uint32_t j = 0; j < mesh.m_NumSubmeshes; j++)
 	{
-		GPU_Struct::ObjectCullData objectCullData;
-		mesh.m_Submeshes[j].m_Bounds.Transform(objectCullData.Bounds, instanceData.Transform);
-		objectCullData.GlobalMeshletOffset = mesh.m_Submeshes[j].MeshletGlobalOffset;
-		objectCullData.GlobalVertexOffset = mesh.m_Submeshes[j].VertexGlobalOffset;
-		objectCullData.MaterialIndex = mesh.m_Submeshes[j].m_MaterialID;
+		aZero::GPUStruct::InstanceCullData objectCullData;
+		objectCullData.WorldSpaceBounds.Origin = instanceData.WorldMatrix * glm::vec4(mesh.m_Submeshes[j].Bounds.Origin, 1.f);
 		objectCullData.MeshletCount = mesh.m_Submeshes[j].MeshletCount;
-		objectCullData.InstanceDataIndex = instanceDataIndex + baseOffsetInstanceIndex;
+		objectCullData.MaterialTypeIndex = mesh.m_Submeshes[j].MaterialTypeIndex;
+		*(pObjCull + instanceDataIndex) = objectCullData;
 
-		*(pObjCull + perObjectIndex) = objectCullData;
-
-		perObjectIndex++;
+		instanceData.MaterialPtr = mesh.m_Submeshes[j].MaterialPtr;
+		instanceData.MeshletBDA = mesh.m_Submeshes[j].MeshletBufferPtr;
+		instanceData.MeshletBoundsBDA = mesh.m_Submeshes[j].MeshletBoundsBufferPtr;
+		instanceData.VertexBDA = mesh.m_Submeshes[j].VertexBufferPtr;
+		instanceData.MeshletCount = mesh.m_Submeshes[j].MeshletCount;
+		*(pInstance + instanceDataIndex) = instanceData;
+		instanceDataIndex++;
 	}
-
-	instanceDataIndex++;
 }
 
 aZero::Scene::Scene::Scene()
@@ -77,314 +87,553 @@ void aZero::Scene::Scene::Init()
 {
 	m_SceneID = m_IncrementingID.fetch_add(1, std::memory_order_relaxed);
 
-	m_World.component<Component::Position>();
-	m_World.component<Component::Rotation>();
-	m_World.component<Component::Scale>();
-	m_World.component<Component::Camera>();
-	m_World.component<Component::Mesh>();
-	m_World.component<Component::PointLight>();
-	m_World.component<Component::SpotLight>();
-	m_World.component<Component::DirectionalLight>();
-	m_World.component<Component::Rigidbody>();
-	m_World.component<Component::Triggerbody>();
-	m_World.component<Component::Static>();
+	m_World.component<Component::PositionComponent>();
+	m_World.component<Component::RotationComponent>();
+	m_World.component<Component::ScaleComponent>();
+	m_World.component<Component::CameraComponent>();
+	m_World.component<Component::MeshComponent>();
+	m_World.component<Component::PointLightComponent>();
+	m_World.component<Component::SpotLightComponent>();
+	m_World.component<Component::DirectionalLightComponent>();
+	m_World.component<Component::RigidbodyComponent>();
+	m_World.component<Component::TriggerbodyComponent>();
+	m_World.component<Component::StaticComponent>();
 
 	m_RootEntityQuery = m_World.query_builder<>()
-		.with<Component::Position>().oper(flecs::Or)
-		.with<Component::Rotation>().oper(flecs::Or)
-		.with<Component::Scale>().oper(flecs::Or)
-		.with<Component::Camera>().oper(flecs::Or)
-		.with<Component::Mesh>().oper(flecs::Or)
-		.with<Component::PointLight>().oper(flecs::Or)
-		.with<Component::SpotLight>().oper(flecs::Or)
-		.with<Component::DirectionalLight>().oper(flecs::Or)
-		.with<Component::Rigidbody>().oper(flecs::Or)
-		.with<Component::Triggerbody>().oper(flecs::Or)
-		.with<Component::Static>()
+		.with<Component::PositionComponent>().oper(flecs::Or)
+		.with<Component::RotationComponent>().oper(flecs::Or)
+		.with<Component::ScaleComponent>().oper(flecs::Or)
+		.with<Component::CameraComponent>().oper(flecs::Or)
+		.with<Component::MeshComponent>().oper(flecs::Or)
+		.with<Component::PointLightComponent>().oper(flecs::Or)
+		.with<Component::SpotLightComponent>().oper(flecs::Or)
+		.with<Component::DirectionalLightComponent>().oper(flecs::Or)
+		.with<Component::RigidbodyComponent>().oper(flecs::Or)
+		.with<Component::TriggerbodyComponent>().oper(flecs::Or)
+		.with<Component::StaticComponent>()
 		.without(flecs::ChildOf)
 		.build();
 
-	m_Static_Mesh_Query = m_World.query_builder<const Component::Mesh, const Component::Position, const Component::Rotation, const Component::Scale>().with<Component::Static>().build();
-	m_Dynamic_Mesh_Query = m_World.query_builder<const Component::Mesh, const Component::Position, const Component::Rotation, const Component::Scale>().without<Component::Static>().cached().build();
+	m_Static_Mesh_Query = m_World.query_builder<const Component::MeshComponent, const Component::PositionComponent, const Component::RotationComponent, const Component::ScaleComponent>().with<Component::StaticComponent>().build();
+	m_Dynamic_Mesh_Query = m_World.query_builder<const Component::MeshComponent, const Component::PositionComponent, const Component::RotationComponent, const Component::ScaleComponent>().without<Component::StaticComponent>().cached().build();
 
-	m_Static_PointLight_Query = m_World.query_builder<const Component::PointLight, const Component::Position>().with<Component::Static>().build();
-	m_Dynamic_PointLight_Query = m_World.query_builder<const Component::PointLight, const Component::Position>().without<Component::Static>().cached().build();
+	m_Static_PointLight_Query = m_World.query_builder<const Component::PointLightComponent, const Component::PositionComponent>().with<Component::StaticComponent>().build();
+	m_Dynamic_PointLight_Query = m_World.query_builder<const Component::PointLightComponent, const Component::PositionComponent>().without<Component::StaticComponent>().cached().build();
 
-	m_Static_SpotLight_Query = m_World.query_builder<const Component::SpotLight, const Component::Position, const Component::Rotation>().with<Component::Static>().build();
-	m_Dynamic_SpotLight_Query = m_World.query_builder<const Component::SpotLight, const Component::Position, const Component::Rotation>().without<Component::Static>().cached().build();
+	m_Static_SpotLight_Query = m_World.query_builder<const Component::SpotLightComponent, const Component::PositionComponent, const Component::RotationComponent>().with<Component::StaticComponent>().build();
+	m_Dynamic_SpotLight_Query = m_World.query_builder<const Component::SpotLightComponent, const Component::PositionComponent, const Component::RotationComponent>().without<Component::StaticComponent>().cached().build();
 
-	m_Static_DirectionalLight_Query = m_World.query_builder<const Component::DirectionalLight, const Component::Rotation>().with<Component::Static>().build();
-	m_Dynamic_DirectionalLight_Query = m_World.query_builder<const Component::DirectionalLight, const Component::Rotation>().without<Component::Static>().cached().build();
+	m_Static_DirectionalLight_Query = m_World.query_builder<const Component::DirectionalLightComponent, const Component::RotationComponent>().with<Component::StaticComponent>().build();
+	m_Dynamic_DirectionalLight_Query = m_World.query_builder<const Component::DirectionalLightComponent, const Component::RotationComponent>().without<Component::StaticComponent>().cached().build();
 
-	m_CameraQuery = m_World.query_builder<Component::Camera, Component::Position, Component::Rotation>().cached().build();
+	m_CameraQuery = m_World.query_builder<
+		const Component::CameraComponent,
+		const Component::PositionComponent,
+		const Component::RotationComponent>()
+		.order_by<Component::CameraComponent>(
+			[](flecs::entity_t, const Component::CameraComponent* a,
+				flecs::entity_t, const Component::CameraComponent* b)
+			{
+				// High -> low priority
+				// -1 -> b lower than a, 0 -> equal, +1 -> a lower than b
+				return (a->m_PriorityIndex < b->m_PriorityIndex) - (a->m_PriorityIndex > b->m_PriorityIndex);
+			}).cached()
+		.build();
 
-	m_StaticMeshPrefab = m_World.prefab("StaticMeshPrefab").set(Component::Mesh()).set(Component::Position(0, 0, 0)).set(Component::Rotation(0, 0, 0)).set(Component::Scale(1, 1, 1));
-	m_CameraPrefab = m_World.prefab("CameraPrefab").set(Component::Camera(3.14f / 2.f, 0.001f, 1000.f, true, Helper::Rectangle(0,0,1920,1080))).set(Component::Position(0, 0, 0)).set(Component::Rotation(0, 0, 0));
+	m_StaticMeshPrefab = m_World.prefab("StaticMeshPrefab").set(Component::MeshComponent()).set(Component::PositionComponent(0, 0, 0)).set(Component::RotationComponent(0, 0, 0)).set(Component::ScaleComponent(1, 1, 1));
 
-	//m_ParentTransform_Observer = m_World.observer<const Component::Position, const Component::Rotation>().event(flecs::OnSet).each(
-	//	[this](flecs::entity parent, const Component::Position& position, const Component::Rotation& rotation) {
-	//		std::cout << "Hit\n";
-	//		if (parent.has<Component::Static>())
-	//		{
-	//			this->MarkStaticMeshesDirty();
-	//			this->MarkStaticLightsDirty();
-	//		}
-
-	//		parent.children([&position, &rotation](flecs::entity child)
-	//			{
-	//				Component::Position& childPosition = child.get_mut<Component::Position>();
-	//				childPosition += position;
-
-	//				Component::Rotation& childRotation = child.get_mut<Component::Rotation>();
-	//				childRotation += rotation;
-
-	//				/*Component::Scale& childScale = child.get_mut<Component::Scale>();
-	//				childScale += scale;*/
-
-	//				child.modified<Component::Position>();
-	//			});
-	//	}
-	//);
+	Component::CameraComponent cameraPrefab{
+						.m_Type = Component::ECameraType::PERSPECTIVE,
+						.m_PriorityIndex = 1,
+						.m_Fov = M_PI - 1,
+						.m_Top = 0.0f,
+						.m_Left = 0.0f,
+						.m_Bottom = 1.f,
+						.m_Right = 1.f,
+						.m_Near = 0.001f,
+						.m_Far = 1000.f,
+						.m_OptColorTarget = std::nullopt,
+						.m_OptDepthStencilTarget = std::nullopt,
+						.m_ClearColorTargetOnRender = true,
+						.m_ClearDepthStencilTargetOnRender = true
+	};
+	m_CameraPrefab = m_World.prefab("CameraPrefab").set(Component::CameraComponent(cameraPrefab)).set(Component::PositionComponent(0, 0, 0)).set(Component::RotationComponent(0, 0, 0));
 
 	if (m_PhysicsWorld.get()) 
 	{
-		m_RigidbodyStaticMeshPrefab = m_World.prefab("RigidbodyStaticMeshPrefab").set(Component::Rigidbody()).set(Component::Mesh()).set(Component::Position(0, 0, 0)).set(Component::Rotation(0, 0, 0)).set(Component::Scale(1, 1, 1));
+		m_RigidbodyStaticMeshPrefab = m_World.prefab("RigidbodyStaticMeshPrefab").set(Component::RigidbodyComponent()).set(Component::MeshComponent()).set(Component::PositionComponent(0, 0, 0)).set(Component::RotationComponent(0, 0, 0)).set(Component::ScaleComponent(1, 1, 1));
 
-		m_ApplyPhysicsQuery = m_World.query_builder<Component::Rigidbody, Component::Position, Component::Rotation>().without<Component::Static>().cached().build();
-		m_TriggerbodyQuery = m_World.query_builder<Component::Triggerbody, Component::Position>().cached().build();
+		m_ApplyPhysicsQuery = m_World.query_builder<Component::RigidbodyComponent, Component::PositionComponent, Component::RotationComponent>().without<Component::StaticComponent>().cached().build();
+		m_TriggerbodyQuery = m_World.query_builder<Component::TriggerbodyComponent, Component::PositionComponent>().cached().build();
 
-		m_Rigidbody_OnSet_Observer = m_World.observer<Component::Rigidbody>().event(flecs::OnSet).each(
-			[this](flecs::entity entity, Component::Rigidbody& rb) {
+		m_Rigidbody_OnSet_Observer = m_World.observer<Component::RigidbodyComponent>().event(flecs::OnSet).each(
+			[this](flecs::entity entity, Component::RigidbodyComponent& rb) {
 				this->RegisterToPhysics(entity, rb.GetBody(), rb.m_BodySettings);
 			}
 		);
 
-		m_Rigidbody_OnRemove_Observer = m_World.observer<Component::Rigidbody>().event(flecs::OnRemove).each(
-			[this](flecs::entity entity, Component::Rigidbody& rb) {
+		m_Rigidbody_OnRemove_Observer = m_World.observer<Component::RigidbodyComponent>().event(flecs::OnRemove).each(
+			[this](flecs::entity entity, Component::RigidbodyComponent& rb) {
 				this->UnregisterFromPhysics(entity, rb.GetBody());
 			}
 		);
 
-		m_Triggerbody_OnSet_Observer = m_World.observer<Component::Triggerbody>().event(flecs::OnSet).each(
-			[this](flecs::entity entity, Component::Triggerbody& tb) {
+		m_Triggerbody_OnSet_Observer = m_World.observer<Component::TriggerbodyComponent>().event(flecs::OnSet).each(
+			[this](flecs::entity entity, Component::TriggerbodyComponent& tb) {
 				this->RegisterToPhysics(entity, tb.GetBody(), tb.m_BodySettings);
 			}
 		);
 
-		m_Triggerbody_OnRemove_Observer = m_World.observer<Component::Triggerbody>().event(flecs::OnRemove).each(
-			[this](flecs::entity entity, Component::Triggerbody& tb) {
+		m_Triggerbody_OnRemove_Observer = m_World.observer<Component::TriggerbodyComponent>().event(flecs::OnRemove).each(
+			[this](flecs::entity entity, Component::TriggerbodyComponent& tb) {
 				this->UnregisterFromPhysics(entity, tb.GetBody());
 			}
 		);
 	}
 }
 
-void aZero::Scene::Scene::RebuildStaticMeshes(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandList& cmdList)
+void aZero::Scene::Scene::UploadStaticMeshes(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& commandBuffer)
 {
 	// todo Reset stuff, ex. tree, for the new cached data
 	// todo Rehash mesh in tree etc
-
-	m_Static_Mesh_Query.run([this, &frameDataAllocator, &frameDataBuffer, &cmdList] (flecs::iter& it) {
+	size_t objectCullDataOffset = 0;
+	size_t instanceDataOffset = 0;
+	m_Static_Mesh_Query.run([this, &frameDataAllocator, &frameDataBuffer, &commandBuffer, &objectCullDataOffset, &instanceDataOffset] (flecs::iter& it) {
 		using namespace Rendering;
-		GPU_Struct::ObjectCullData* pObjCull = reinterpret_cast<GPU_Struct::ObjectCullData*>(frameDataAllocator.Allocate(m_Static_Mesh_Query.count() * Component::Mesh::s_MaxNumberOfSubmeshes * sizeof(GPU_Struct::ObjectCullData)));
-		size_t objectCullDataOffset = frameDataAllocator.GetOffset() - m_Static_Mesh_Query.count() * Component::Mesh::s_MaxNumberOfSubmeshes * sizeof(GPU_Struct::ObjectCullData);
+		GPUStruct::InstanceCullData* pObjCull = reinterpret_cast<GPUStruct::InstanceCullData*>(frameDataAllocator.Allocate(m_Static_Mesh_Query.count() * Component::MeshComponent::s_MaxNumberOfSubmeshes * sizeof(GPUStruct::InstanceCullData)));
+		objectCullDataOffset = frameDataAllocator.GetOffset() - m_Static_Mesh_Query.count() * Component::MeshComponent::s_MaxNumberOfSubmeshes * sizeof(GPUStruct::InstanceCullData);
 
-		GPU_Struct::InstanceData* pInstance = reinterpret_cast<GPU_Struct::InstanceData*>(frameDataAllocator.Allocate(m_Static_Mesh_Query.count() * Component::Mesh::s_MaxNumberOfSubmeshes * sizeof(GPU_Struct::InstanceData)));
-		size_t instanceDataOffset = frameDataAllocator.GetOffset() - m_Static_Mesh_Query.count() * Component::Mesh::s_MaxNumberOfSubmeshes * sizeof(GPU_Struct::InstanceData);
+		GPUStruct::InstanceData* pInstance = reinterpret_cast<GPUStruct::InstanceData*>(frameDataAllocator.Allocate(m_Static_Mesh_Query.count() * Component::MeshComponent::s_MaxNumberOfSubmeshes * sizeof(GPUStruct::InstanceData)));
+		instanceDataOffset = frameDataAllocator.GetOffset() - m_Static_Mesh_Query.count() * Component::MeshComponent::s_MaxNumberOfSubmeshes * sizeof(GPUStruct::InstanceData); // This guarantees offset starts after alignment
 
-		uint32_t numUniqueMeshes = 0;
-		uint32_t numUniqueInstanceData = 0;
+		uint32_t numStaticInstances = 0;
 
 		while (it.next())
 		{
-			auto mesh = it.field<const Component::Mesh>(0);
-			auto position = it.field<const Component::Position>(1);
-			auto rotation = it.field<const Component::Rotation>(2);
-			auto scale = it.field<const Component::Scale>(3);
+			auto mesh = it.field<const Component::MeshComponent>(0);
+			auto position = it.field<const Component::PositionComponent>(1);
+			auto rotation = it.field<const Component::RotationComponent>(2);
+			auto scale = it.field<const Component::ScaleComponent>(3);
 
 			for (auto i : it)
 			{
-				WriteRenderFormat(pObjCull, pInstance, mesh[i], position[i], rotation[i], scale[i], numUniqueMeshes, numUniqueInstanceData, 0);
+				WriteRenderFormat(pObjCull, pInstance, mesh[i], position[i], rotation[i], scale[i], numStaticInstances, 0);
 			}
 		}
 
-		m_NumUniqueStaticMeshes = numUniqueMeshes;
-		m_NumUniqueStaticInstanceData = numUniqueInstanceData;
-
-		cmdList->CopyBufferRegion(m_RenderData.ObjectCullDataBuffer.GetResource(), 0, frameDataBuffer.GetResource(), objectCullDataOffset, m_NumUniqueStaticMeshes * sizeof(GPU_Struct::ObjectCullData));
-		cmdList->CopyBufferRegion(m_RenderData.InstanceBuffer.GetResource(), 0, frameDataBuffer.GetResource(), instanceDataOffset, m_NumUniqueStaticInstanceData * sizeof(GPU_Struct::InstanceData));
+		m_NumStaticInstances = numStaticInstances;
 	});
+
+	commandBuffer.Copy(frameDataBuffer, objectCullDataOffset, m_RenderData.InstanceCullDataBuffer, 0, m_NumStaticInstances * sizeof(GPUStruct::InstanceCullData));
+	commandBuffer.Copy(frameDataBuffer, instanceDataOffset, m_RenderData.InstanceBuffer, 0, m_NumStaticInstances * sizeof(GPUStruct::InstanceData));
 }
 
-uint32_t aZero::Scene::Scene::UploadDynamicMeshes(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandList& cmdList)
+uint32_t aZero::Scene::Scene::UploadDynamicMeshes(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& commandBuffer)
 {
 	using namespace Rendering;
-	uint32_t entityUpdateCount = m_Dynamic_Mesh_Query.count() * Component::Mesh::s_MaxNumberOfSubmeshes;
+	uint32_t entityUpdateCount = m_Dynamic_Mesh_Query.count() * Component::MeshComponent::s_MaxNumberOfSubmeshes;
 
-	GPU_Struct::ObjectCullData* pObjCull = reinterpret_cast<GPU_Struct::ObjectCullData*>(frameDataAllocator.Allocate(entityUpdateCount * sizeof(GPU_Struct::ObjectCullData)));
-	size_t objectCullDataOffset = frameDataAllocator.GetOffset() - entityUpdateCount * sizeof(GPU_Struct::ObjectCullData);
+	GPUStruct::InstanceCullData* pObjCull = reinterpret_cast<GPUStruct::InstanceCullData*>(frameDataAllocator.Allocate(entityUpdateCount * sizeof(GPUStruct::InstanceCullData)));
+	size_t objectCullDataOffset = frameDataAllocator.GetOffset() - entityUpdateCount * sizeof(GPUStruct::InstanceCullData);
 
-	GPU_Struct::InstanceData* pInstance = reinterpret_cast<GPU_Struct::InstanceData*>(frameDataAllocator.Allocate(entityUpdateCount * sizeof(GPU_Struct::InstanceData)));
-	size_t instanceDataOffset = frameDataAllocator.GetOffset() - entityUpdateCount * sizeof(GPU_Struct::InstanceData);
+	GPUStruct::InstanceData* pInstance = reinterpret_cast<GPUStruct::InstanceData*>(frameDataAllocator.Allocate(entityUpdateCount * sizeof(GPUStruct::InstanceData)));
+	size_t instanceDataOffset = frameDataAllocator.GetOffset() - entityUpdateCount * sizeof(GPUStruct::InstanceData);
 
-	uint32_t numUniqueMeshes = 0;
-	uint32_t numUniqueInstanceData = 0;
-	m_Dynamic_Mesh_Query.each([pObjCull, pInstance, &numUniqueMeshes, &numUniqueInstanceData, this](const Component::Mesh& mesh, const Component::Position& position, const Component::Rotation& rotation, const Component::Scale& scale)
+	uint32_t numDynamicInstances = 0;
+	m_Dynamic_Mesh_Query.each([pObjCull, pInstance, &numDynamicInstances, this](const Component::MeshComponent& mesh, const Component::PositionComponent& position, const Component::RotationComponent& rotation, const Component::ScaleComponent& scale)
 		{
-			WriteRenderFormat(pObjCull, pInstance, mesh, position, rotation, scale, numUniqueMeshes, numUniqueInstanceData, m_NumUniqueStaticInstanceData);
+			WriteRenderFormat(pObjCull, pInstance, mesh, position, rotation, scale, numDynamicInstances, m_NumStaticInstances);
 		});
 
-	cmdList->CopyBufferRegion(m_RenderData.ObjectCullDataBuffer.GetResource(),
-		m_NumUniqueStaticMeshes * sizeof(GPU_Struct::ObjectCullData), // Copy from the end of the cached mesh entities
-		frameDataBuffer.GetResource(), objectCullDataOffset, numUniqueMeshes * sizeof(GPU_Struct::ObjectCullData));
+	commandBuffer.Copy(frameDataBuffer, objectCullDataOffset, m_RenderData.InstanceCullDataBuffer, m_NumStaticInstances * sizeof(GPUStruct::InstanceCullData), numDynamicInstances * sizeof(GPUStruct::InstanceCullData));
+	commandBuffer.Copy(frameDataBuffer, instanceDataOffset, m_RenderData.InstanceBuffer, m_NumStaticInstances * sizeof(GPUStruct::InstanceData), numDynamicInstances * sizeof(GPUStruct::InstanceData));
 
-	cmdList->CopyBufferRegion(m_RenderData.InstanceBuffer.GetResource(),
-		m_NumUniqueStaticInstanceData * sizeof(GPU_Struct::InstanceData), // Copy from the end of the cached mesh entities
-		frameDataBuffer.GetResource(), instanceDataOffset, numUniqueInstanceData * sizeof(GPU_Struct::InstanceData));
-
-	return m_NumUniqueStaticMeshes + numUniqueMeshes;
+	return m_NumStaticInstances + numDynamicInstances;
 }
 
-void aZero::Scene::Scene::RebuildStaticLights(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandList& cmdList)
+void aZero::Scene::Scene::UploadStaticLights(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& commandBuffer)
 {
 	using namespace Rendering;
 
 	{
-		GPU_Struct::PointLight* plight = reinterpret_cast<GPU_Struct::PointLight*>(frameDataAllocator.Allocate(m_Static_PointLight_Query.count() * sizeof(GPU_Struct::PointLight)));
-		size_t srcOffset = frameDataAllocator.GetOffset() - m_Static_PointLight_Query.count() * sizeof(GPU_Struct::PointLight);
+		GPUStruct::PointLight* plight = reinterpret_cast<GPUStruct::PointLight*>(frameDataAllocator.Allocate(m_Static_PointLight_Query.count() * sizeof(GPUStruct::PointLight)));
+		size_t srcOffset = frameDataAllocator.GetOffset() - m_Static_PointLight_Query.count() * sizeof(GPUStruct::PointLight);
 		uint32_t numLights = 0;
-		m_Static_PointLight_Query.each([&numLights, &plight](const Component::PointLight& light, const Component::Position& position) {
-			*(plight + numLights) = GPU_Struct::PointLight(light, position);
+		m_Static_PointLight_Query.each([&numLights, &plight](const Component::PointLightComponent& light, const Component::PositionComponent& position) {
+			GPUStruct::PointLight l{
+				.Color = light.Color,
+				.Position = position.Position,
+				.Range = light.Range,
+				.Falloff = light.Falloff,
+				.Intensity = light.Intensity
+			};
+			*(plight + numLights) = l;
 			numLights++;
 		});
-		cmdList->CopyBufferRegion(m_RenderData.PointLightBuffer.GetResource(), 0, frameDataBuffer.GetResource(), srcOffset, numLights * sizeof(GPU_Struct::PointLight));
+		if (numLights)
+		{
+			commandBuffer.Copy(frameDataBuffer, srcOffset, m_RenderData.PointLightBuffer, 0, numLights * sizeof(GPUStruct::PointLight));
+		}
 		m_NumStaticPointLights = numLights;
 	}
 
 	{
-		GPU_Struct::SpotLight* plight = reinterpret_cast<GPU_Struct::SpotLight*>(frameDataAllocator.Allocate(m_Static_SpotLight_Query.count() * sizeof(GPU_Struct::SpotLight)));
-		size_t srcOffset = frameDataAllocator.GetOffset() - m_Static_SpotLight_Query.count() * sizeof(GPU_Struct::SpotLight);
+		GPUStruct::SpotLight* plight = reinterpret_cast<GPUStruct::SpotLight*>(frameDataAllocator.Allocate(m_Static_SpotLight_Query.count() * sizeof(GPUStruct::SpotLight)));
+		size_t srcOffset = frameDataAllocator.GetOffset() - m_Static_SpotLight_Query.count() * sizeof(GPUStruct::SpotLight);
 		uint32_t numLights = 0;
-		m_Static_SpotLight_Query.each([&numLights, &plight](const Component::SpotLight& light, const Component::Position& position, const Component::Rotation& rotation) {
-			*(plight + numLights) = GPU_Struct::SpotLight(light, position, rotation);
+		m_Static_SpotLight_Query.each([&numLights, &plight](const Component::SpotLightComponent& light, const Component::PositionComponent& position, const Component::RotationComponent& rotation) {
+			GPUStruct::SpotLight l{
+				.Color = light.Color,
+				.Position = position.Position,
+				.Direction = rotation.Rotation,
+				.Intensity = light.Intensity,
+				.Radius = light.Radius
+			};
+			*(plight + numLights) = l;
 			numLights++;
 		});
-		cmdList->CopyBufferRegion(m_RenderData.SpotLightBuffer.GetResource(), 0, frameDataBuffer.GetResource(), srcOffset, numLights * sizeof(GPU_Struct::SpotLight));
+		if (numLights)
+		{
+			commandBuffer.Copy(frameDataBuffer, srcOffset, m_RenderData.SpotLightBuffer, 0, numLights * sizeof(GPUStruct::SpotLight));
+		}
 		m_NumStaticSpotLights = numLights;
 	}
 
 	{
-		GPU_Struct::DirectionalLight* plight = reinterpret_cast<GPU_Struct::DirectionalLight*>(frameDataAllocator.Allocate(m_Static_DirectionalLight_Query.count() * sizeof(GPU_Struct::DirectionalLight)));
-		size_t srcOffset = frameDataAllocator.GetOffset() - m_Static_DirectionalLight_Query.count() * sizeof(GPU_Struct::DirectionalLight);
+		GPUStruct::DirectionalLight* plight = reinterpret_cast<GPUStruct::DirectionalLight*>(frameDataAllocator.Allocate(m_Static_DirectionalLight_Query.count() * sizeof(GPUStruct::DirectionalLight)));
+		size_t srcOffset = frameDataAllocator.GetOffset() - m_Static_DirectionalLight_Query.count() * sizeof(GPUStruct::DirectionalLight);
 		uint32_t numLights = 0;
-		m_Static_DirectionalLight_Query.each([&numLights, &plight](const Component::DirectionalLight& light, const Component::Rotation& rotation) {
-			*(plight + numLights) = GPU_Struct::DirectionalLight(light, rotation);
+		m_Static_DirectionalLight_Query.each([&numLights, &plight](const Component::DirectionalLightComponent& light, const Component::RotationComponent& rotation) {
+			GPUStruct::DirectionalLight l{
+				.Color = light.Color,
+				.Direction = rotation.Rotation,
+				.Intensity = light.Intensity,
+			};
+			*(plight + numLights) = l;
 			numLights++;
 			});
-		cmdList->CopyBufferRegion(m_RenderData.DirectionalLightBuffer.GetResource(), 0, frameDataBuffer.GetResource(), srcOffset, numLights * sizeof(GPU_Struct::DirectionalLight));
+		if (numLights)
+		{
+			commandBuffer.Copy(frameDataBuffer, srcOffset, m_RenderData.DirectionalLightBuffer, 0, numLights * sizeof(GPUStruct::DirectionalLight));
+		}
 		m_NumStaticDirectionalLights = numLights;
 	}
 }
 
-std::tuple<uint32_t, uint32_t, uint32_t> aZero::Scene::Scene::UploadDynamicLights(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandList& cmdList)
+std::tuple<uint32_t, uint32_t, uint32_t> aZero::Scene::Scene::UploadDynamicLights(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& commandBuffer)
 {
 	using namespace Rendering;
 
 	uint32_t numPointLights = 0, numSpotLights = 0, numDirectionalLights = 0;
 	{
-		GPU_Struct::PointLight* plight = reinterpret_cast<GPU_Struct::PointLight*>(frameDataAllocator.Allocate(m_Dynamic_PointLight_Query.count() * sizeof(GPU_Struct::PointLight)));
-		size_t srcOffset = frameDataAllocator.GetOffset() - m_Dynamic_PointLight_Query.count() * sizeof(GPU_Struct::PointLight);
-		uint32_t numLights = 0;
-		m_Dynamic_PointLight_Query.each([&numLights, &plight](const Component::PointLight& light, const Component::Position& position) {
-			*(plight + numLights) = GPU_Struct::PointLight(light, position);
-			numLights++;
+		GPUStruct::PointLight* plight = reinterpret_cast<GPUStruct::PointLight*>(frameDataAllocator.Allocate(m_Dynamic_PointLight_Query.count() * sizeof(GPUStruct::PointLight)));
+		size_t srcOffset = frameDataAllocator.GetOffset() - m_Dynamic_PointLight_Query.count() * sizeof(GPUStruct::PointLight);
+		m_Dynamic_PointLight_Query.each([&numPointLights, &plight](const Component::PointLightComponent& light, const Component::PositionComponent& position) {
+			GPUStruct::PointLight l{
+				.Color = light.Color,
+				.Position = position.Position,
+				.Range = light.Range,
+				.Falloff = light.Falloff,
+				.Intensity = light.Intensity
+			};
+			*(plight + numPointLights) = l;
+			numPointLights++;
 			});
-		cmdList->CopyBufferRegion(m_RenderData.PointLightBuffer.GetResource(), m_NumStaticPointLights * sizeof(GPU_Struct::PointLight), frameDataBuffer.GetResource(), srcOffset, numLights * sizeof(GPU_Struct::PointLight));
-		numPointLights = numLights + m_NumStaticPointLights;
+		if (numPointLights)
+		{
+			commandBuffer.Copy(frameDataBuffer, srcOffset, m_RenderData.PointLightBuffer, m_NumStaticPointLights * sizeof(GPUStruct::PointLight), numPointLights * sizeof(GPUStruct::PointLight));
+		}
 	}
 
 	{
-		GPU_Struct::SpotLight* plight = reinterpret_cast<GPU_Struct::SpotLight*>(frameDataAllocator.Allocate(m_Dynamic_SpotLight_Query.count() * sizeof(GPU_Struct::SpotLight)));
-		size_t srcOffset = frameDataAllocator.GetOffset() - m_Dynamic_SpotLight_Query.count() * sizeof(GPU_Struct::SpotLight);
-		uint32_t numLights = 0;
-		m_Dynamic_SpotLight_Query.each([&numLights, &plight](const Component::SpotLight& light, const Component::Position& position, const Component::Rotation& rotation) {
-			*(plight + numLights) = GPU_Struct::SpotLight(light, position, rotation);
-			numLights++;
+		GPUStruct::SpotLight* plight = reinterpret_cast<GPUStruct::SpotLight*>(frameDataAllocator.Allocate(m_Dynamic_SpotLight_Query.count() * sizeof(GPUStruct::SpotLight)));
+		size_t srcOffset = frameDataAllocator.GetOffset() - m_Dynamic_SpotLight_Query.count() * sizeof(GPUStruct::SpotLight);
+		m_Dynamic_SpotLight_Query.each([&numSpotLights, &plight](const Component::SpotLightComponent& light, const Component::PositionComponent& position, const Component::RotationComponent& rotation) {
+			GPUStruct::SpotLight l{
+				.Color = light.Color,
+				.Position = position.Position,
+				.Direction = rotation.Rotation,
+				.Intensity = light.Intensity,
+				.Radius = light.Radius
+			};
+			*(plight + numSpotLights) = l;
+			numSpotLights++;
 			});
-		cmdList->CopyBufferRegion(m_RenderData.SpotLightBuffer.GetResource(), m_NumStaticSpotLights * sizeof(GPU_Struct::PointLight), frameDataBuffer.GetResource(), srcOffset, numLights * sizeof(GPU_Struct::SpotLight));
-		numSpotLights = numLights + m_NumStaticSpotLights;
+		if (numSpotLights)
+		{
+			commandBuffer.Copy(frameDataBuffer, srcOffset, m_RenderData.SpotLightBuffer, m_NumStaticSpotLights * sizeof(GPUStruct::SpotLight), numSpotLights * sizeof(GPUStruct::SpotLight));
+		}
 	}
 
 	{
-		GPU_Struct::DirectionalLight* plight = reinterpret_cast<GPU_Struct::DirectionalLight*>(frameDataAllocator.Allocate(m_Dynamic_DirectionalLight_Query.count() * sizeof(GPU_Struct::DirectionalLight)));
-		size_t srcOffset = frameDataAllocator.GetOffset() - m_Dynamic_DirectionalLight_Query.count() * sizeof(GPU_Struct::DirectionalLight);
-		uint32_t numLights = 0;
-		m_Dynamic_DirectionalLight_Query.each([&numLights, &plight](const Component::DirectionalLight& light, const Component::Rotation& rotation) {
-			*(plight + numLights) = GPU_Struct::DirectionalLight(light, rotation);
-			numLights++;
+		GPUStruct::DirectionalLight* plight = reinterpret_cast<GPUStruct::DirectionalLight*>(frameDataAllocator.Allocate(m_Dynamic_DirectionalLight_Query.count() * sizeof(GPUStruct::DirectionalLight)));
+		size_t srcOffset = frameDataAllocator.GetOffset() - m_Dynamic_DirectionalLight_Query.count() * sizeof(GPUStruct::DirectionalLight);
+		m_Dynamic_DirectionalLight_Query.each([&numDirectionalLights, &plight](const Component::DirectionalLightComponent& light, const Component::RotationComponent& rotation) {
+			GPUStruct::DirectionalLight l{
+				.Color = light.Color,
+				.Direction = rotation.Rotation,
+				.Intensity = light.Intensity,
+			};
+			*(plight + numDirectionalLights) = l;
+			numDirectionalLights++;
 			});
-		cmdList->CopyBufferRegion(m_RenderData.DirectionalLightBuffer.GetResource(), m_NumStaticDirectionalLights * sizeof(GPU_Struct::PointLight), frameDataBuffer.GetResource(), srcOffset, numLights * sizeof(GPU_Struct::DirectionalLight));
-		numDirectionalLights = numLights + m_NumStaticDirectionalLights;
+		if (numDirectionalLights)
+		{
+			commandBuffer.Copy(frameDataBuffer, srcOffset, m_RenderData.DirectionalLightBuffer, m_NumStaticDirectionalLights * sizeof(GPUStruct::DirectionalLight), numDirectionalLights * sizeof(GPUStruct::DirectionalLight));
+		}
 	}
+
+	numPointLights = numPointLights + m_NumStaticPointLights;
+	numSpotLights = numSpotLights + m_NumStaticSpotLights;
+	numDirectionalLights = numDirectionalLights + m_NumStaticDirectionalLights;
 	return { numPointLights, numSpotLights, numDirectionalLights };
 }
 
-std::tuple<aZero::Scene::SceneRenderDataFrameInfo, std::reference_wrapper<aZero::Scene::SceneRenderData>> aZero::Scene::Scene::GetRenderData(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandList& cmdList)
+
+std::vector<const aZero::Component::CameraComponent*> aZero::Scene::Scene::UploadCameras(aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& commandBuffer)
+{
+	uint32_t cameraSrcOffset = frameDataAllocator.GetOffset();
+	GPUStruct::CameraData* pCameraData = reinterpret_cast<GPUStruct::CameraData*>(frameDataAllocator.Allocate(m_CameraQuery.count() * sizeof(GPUStruct::CameraData)));
+
+	std::vector<const Component::CameraComponent*> activeCameras;
+	activeCameras.reserve(m_CameraQuery.count());
+	m_CameraQuery.each([this, &activeCameras, &pCameraData](const Component::CameraComponent& camera, const Component::PositionComponent& position, const Component::RotationComponent& rotation)
+		{
+			if (camera.m_IsActive)
+			{
+				GPUStruct::CameraData cameraData;
+				cameraData.ViewMatrix = camera.CreateViewMatrix(position.Position, rotation.Rotation);
+				cameraData.ViewProjectionMatrix = camera.CreateProjectionMatrix() * cameraData.ViewMatrix;
+				cameraData.Frustum = camera.CreateFrustra(position.Position, rotation.Rotation);
+				activeCameras.emplace_back(&camera);
+				*pCameraData = cameraData;
+				pCameraData++;
+			}
+		});
+	commandBuffer.Copy(frameDataBuffer, cameraSrcOffset, m_RenderData.CameraBuffer, 0, activeCameras.size() * sizeof(GPUStruct::CameraData));
+
+	return activeCameras;
+}
+
+std::tuple<aZero::Scene::SceneRenderDataFrameInfo, std::reference_wrapper<aZero::Scene::SceneRenderData>> aZero::Scene::Scene::CreateRenderData(RenderAPI::Core& core, Renderer::ResourceRecycler& recycler, aZero::LinearAllocator<>& frameDataAllocator, RenderAPI::Buffer& frameDataBuffer, RenderAPI::CommandBuffer& commandBuffer)
 {
 	using namespace Rendering;
 
-	if (!m_RenderData.ObjectCullDataBuffer.GetResource())
-	{
-		ID3D12DeviceX* device = GetID3D12DeviceX(cmdList.Get());
-		m_RenderData.ObjectCullDataBuffer = RenderAPI::Buffer(device, RenderAPI::Buffer::Desc(sizeof(GPU_Struct::ObjectCullData) * 100000, D3D12_HEAP_TYPE_DEFAULT), &frameDataBuffer.GetResourceRecycler());
-		m_RenderData.InstanceBuffer = RenderAPI::Buffer(device, RenderAPI::Buffer::Desc(sizeof(GPU_Struct::InstanceData) * 100000, D3D12_HEAP_TYPE_DEFAULT), &frameDataBuffer.GetResourceRecycler());
-		m_RenderData.CameraBuffer = RenderAPI::Buffer(device, RenderAPI::Buffer::Desc(sizeof(GPU_Struct::CameraData) * 100, D3D12_HEAP_TYPE_DEFAULT), &frameDataBuffer.GetResourceRecycler());
+	// todo Handle if no space
 
-		m_RenderData.PointLightBuffer = RenderAPI::Buffer(device, RenderAPI::Buffer::Desc(sizeof(GPU_Struct::PointLight) * 1000, D3D12_HEAP_TYPE_DEFAULT), &frameDataBuffer.GetResourceRecycler());
-		m_RenderData.SpotLightBuffer = RenderAPI::Buffer(device, RenderAPI::Buffer::Desc(sizeof(GPU_Struct::SpotLight) * 1000, D3D12_HEAP_TYPE_DEFAULT), &frameDataBuffer.GetResourceRecycler());
-		m_RenderData.DirectionalLightBuffer = RenderAPI::Buffer(device, RenderAPI::Buffer::Desc(sizeof(GPU_Struct::DirectionalLight) * 100, D3D12_HEAP_TYPE_DEFAULT), &frameDataBuffer.GetResourceRecycler());
+	if (!m_RenderData.InstanceCullDataBuffer.IsInitialized())
+	{
+		RenderAPI::Buffer::Desc desc{
+					.Size = 10000 * sizeof(GPUStruct::InstanceCullData),
+					.UsageBits =
+						VkBufferUsageFlagBits::VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+						VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+						VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+					.MemoryType = RenderAPI::EMemoryType::VRAM,
+					.SeperateHeap = true,
+					.Name = "m_RenderData.ObjectCullDataBuffer",
+					.OptResourceRecycler = recycler
+		};
+
+		m_RenderData.InstanceCullDataBuffer = RenderAPI::Buffer(core, desc);
+
+		desc.Name = "m_RenderData.InstanceBuffer";
+		desc.Size = 10000 * sizeof(GPUStruct::InstanceData);
+		m_RenderData.InstanceBuffer = RenderAPI::Buffer(core, desc);
+
+		desc.Name = "m_RenderData.CameraBuffer";
+		desc.Size = 1000 * sizeof(GPUStruct::CameraData);
+		desc.UsageBits =
+			VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+			VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		m_RenderData.CameraBuffer = RenderAPI::Buffer(core, desc);
+
+		desc.Name = "m_RenderData.PointLightBuffer";
+		desc.Size = 1000 * sizeof(GPUStruct::PointLight);
+		desc.UsageBits =
+			VkBufferUsageFlagBits::VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+			VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		m_RenderData.PointLightBuffer = RenderAPI::Buffer(core, desc);
+
+		desc.Name = "m_RenderData.SpotLightBuffer";
+		desc.Size = 1000 * sizeof(GPUStruct::SpotLight);
+		desc.UsageBits =
+			VkBufferUsageFlagBits::VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+			VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		m_RenderData.SpotLightBuffer = RenderAPI::Buffer(core, desc);
+
+		desc.Name = "m_RenderData.DirectionalLightBuffer";
+		desc.Size = 100 * sizeof(GPUStruct::SpotLight);
+		desc.UsageBits =
+			VkBufferUsageFlagBits::VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+			VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		m_RenderData.DirectionalLightBuffer = RenderAPI::Buffer(core, desc);
 	}
 
-	/*this->m_RenderData.CameraRSData.clear();
+	std::vector<VkBufferMemoryBarrier2> barriers;
 
-	std::vector<Rendering::GPU_Struct::CameraData> cameraGPUData;
-	m_CameraQuery.each([this, &cameraGPUData](const Component::Camera& camera, const Component::Position& position, const Component::Rotation& rotation)
-		{
-			if (camera.isActive)
-			{
-				GPU_Struct::CameraData cameraData;
-				cameraData.ViewMatrix = camera.GetViewMatrix(position, rotation);
-				cameraData.ViewProjectionMatrix = camera.GetViewProjectionMatrix(position, rotation);
-				cameraData.Frustum = camera.GetFrustum();
-				cameraGPUData.emplace_back(cameraData);
-				this->m_RenderData.CameraRSData.emplace_back(camera.GetViewport());
-			}
-		});
+	// Pre-copy barriers
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+						.DstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+						.Offset = 0,
+						.Size = m_RenderData.InstanceCullDataBuffer.GetDesc().Size
+		};
+		m_RenderData.InstanceCullDataBuffer.Transition(trDesc);
 
-	size_t cameraDataOffset = frameDataAllocator.GetOffset();
-	GPU_Struct::CameraData* pCameraData = reinterpret_cast<GPU_Struct::CameraData*>(frameDataAllocator.Allocate(cameraGPUData.size() * sizeof(GPU_Struct::CameraData)));
-	memcpy(pCameraData, cameraGPUData.data(), cameraGPUData.size() * sizeof(GPU_Struct::CameraData));
+		trDesc.Size = m_RenderData.InstanceBuffer.GetDesc().Size;
+		m_RenderData.InstanceBuffer.Transition(trDesc);
 
-	cmdList->CopyBufferRegion(m_RenderData.CameraBuffer.GetResource(),
-		0, frameDataBuffer.GetResource(), cameraDataOffset, cameraGPUData.size() * sizeof(GPU_Struct::CameraData));*/
+		barriers.push_back(m_RenderData.InstanceCullDataBuffer.GetTransition());
+		barriers.push_back(m_RenderData.InstanceBuffer.GetTransition());
+	}
 
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+						.DstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+						.Offset = 0,
+						.Size = m_RenderData.CameraBuffer.GetDesc().Size
+		};
+		m_RenderData.CameraBuffer.Transition(trDesc);
+		barriers.push_back(m_RenderData.CameraBuffer.GetTransition());
+	}
+
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+						.DstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+						.Offset = 0,
+						.Size = m_RenderData.PointLightBuffer.GetDesc().Size
+		};
+		m_RenderData.PointLightBuffer.Transition(trDesc);
+		barriers.push_back(m_RenderData.PointLightBuffer.GetTransition());
+	}
+
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+						.DstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+						.Offset = 0,
+						.Size = m_RenderData.SpotLightBuffer.GetDesc().Size
+		};
+		m_RenderData.SpotLightBuffer.Transition(trDesc);
+		barriers.push_back(m_RenderData.SpotLightBuffer.GetTransition());
+	}
+
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+						.DstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+						.Offset = 0,
+						.Size = m_RenderData.DirectionalLightBuffer.GetDesc().Size
+		};
+		m_RenderData.DirectionalLightBuffer.Transition(trDesc);
+		barriers.push_back(m_RenderData.DirectionalLightBuffer.GetTransition());
+	}
+	
+	commandBuffer.Barrier({}, {}, barriers);
+	//
+
+	// Copy stage
 	if (m_ShouldRebuildStaticMeshes)
 	{
-		this->RebuildStaticMeshes(frameDataAllocator, frameDataBuffer, cmdList);
+		this->UploadStaticMeshes(frameDataAllocator, frameDataBuffer, commandBuffer);
 		m_ShouldRebuildStaticMeshes = false;
 	}
+	uint32_t totalMeshCount = this->UploadDynamicMeshes(frameDataAllocator, frameDataBuffer, commandBuffer);
+	auto activeCameras = this->UploadCameras(frameDataAllocator, frameDataBuffer, commandBuffer);
 
 	if (m_ShouldRebuildStaticLights)
 	{
-		this->RebuildStaticLights(frameDataAllocator, frameDataBuffer, cmdList);
+		this->UploadStaticLights(frameDataAllocator, frameDataBuffer, commandBuffer);
 		m_ShouldRebuildStaticLights = false;
 	}
+	const auto [numPointLights, numSpotLights, numDirectionalLights] = this->UploadDynamicLights(frameDataAllocator, frameDataBuffer, commandBuffer);
 
-	const auto [numPointLights, numSpotLights, numDirectionalLights] = this->UploadDynamicLights(frameDataAllocator, frameDataBuffer, cmdList);
+	// Post-copy barriers
+	barriers.clear();
+
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+						.DstAccessMask = VK_ACCESS_2_UNIFORM_READ_BIT,
+						.Offset = 0,
+						.Size = m_RenderData.CameraBuffer.GetDesc().Size
+		};
+		m_RenderData.CameraBuffer.Transition(trDesc);
+		barriers.push_back(m_RenderData.CameraBuffer.GetTransition());
+	}
+
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+						.DstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+						.Offset = 0,
+						.Size = m_RenderData.InstanceCullDataBuffer.GetDesc().Size
+		};
+		m_RenderData.InstanceCullDataBuffer.Transition(trDesc);
+		barriers.push_back(m_RenderData.InstanceCullDataBuffer.GetTransition());
+	}
+
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						   .DstStageMask = VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT,
+						   .DstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+						   .Offset = 0,
+						   .Size = m_RenderData.InstanceBuffer.GetDesc().Size
+		};
+		m_RenderData.InstanceBuffer.Transition(trDesc);
+		barriers.push_back(m_RenderData.InstanceBuffer.GetTransition());
+	}
+
+	// We insert a barrier for the next compute shader for pointlights and spotlights since we'll add clustered or tiled shading later and'll be reading them there too
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+						.DstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+						.Offset = 0,
+						.Size = m_RenderData.PointLightBuffer.GetDesc().Size
+		};
+		m_RenderData.PointLightBuffer.Transition(trDesc);
+		barriers.push_back(m_RenderData.PointLightBuffer.GetTransition());
+	}
+
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+						.DstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+						.Offset = 0,
+						.Size = m_RenderData.SpotLightBuffer.GetDesc().Size
+		};
+		m_RenderData.SpotLightBuffer.Transition(trDesc);
+		barriers.push_back(m_RenderData.SpotLightBuffer.GetTransition());
+	}
+	//
+
+	{
+		aZero::RenderAPI::Buffer::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+						.DstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+						.Offset = 0,
+						.Size = m_RenderData.DirectionalLightBuffer.GetDesc().Size
+		};
+		m_RenderData.DirectionalLightBuffer.Transition(trDesc);
+		barriers.push_back(m_RenderData.DirectionalLightBuffer.GetTransition());
+	}
+
+	commandBuffer.Barrier({}, {}, { barriers });
+	//
 
 	return { SceneRenderDataFrameInfo{
-		.MeshCount = this->UploadDynamicMeshes(frameDataAllocator, frameDataBuffer, cmdList),
-		.PointLightCount = numPointLights, .SpotLightCount = numSpotLights, .DirectionalLightCount = numDirectionalLights
+		.MeshCount = totalMeshCount,
+		.PointLightCount = numPointLights, .SpotLightCount = numSpotLights, .DirectionalLightCount = numDirectionalLights,
+		.Cameras = std::move(activeCameras)
 	}, m_RenderData };
 }
 
@@ -394,13 +643,13 @@ void aZero::Scene::Scene::ApplyPhysics()
 	{
 		this->ResolveCollisionEvents();
 
-		m_ApplyPhysicsQuery.each([](Component::Rigidbody& rigidBody, Component::Position& position, Component::Rotation& rotation) {
+		m_ApplyPhysicsQuery.each([](Component::RigidbodyComponent& rigidBody, Component::PositionComponent& position, Component::RotationComponent& rotation) {
 			auto lock = rigidBody.m_Body.LockForRead();
 			if (lock.Succeeded())
 			{
 				auto& body = lock.GetBody();
 				position = Math::Convert(body.GetPosition());
-				rotation = Math::Convert(body.GetRotation()).ToEuler();
+				rotation = glm::eulerAngles(Math::Convert(body.GetRotation()));
 			}
 		});
 	}
@@ -425,7 +674,7 @@ void aZero::Scene::Scene::OptimizePhysics()
 	}
 }
 
-void aZero::Scene::Scene::RegisterToPhysics(flecs::entity entity, Physics::Body& body, JPH::BodyCreationSettings& bodySettings)
+bool aZero::Scene::Scene::RegisterToPhysics(flecs::entity entity, Physics::Body& body, JPH::BodyCreationSettings& bodySettings)
 {
 	if (m_BodyID_To_EntityID.count(body.GetBodyID().GetIndexAndSequenceNumber()))
 	{
@@ -433,8 +682,13 @@ void aZero::Scene::Scene::RegisterToPhysics(flecs::entity entity, Physics::Body&
 	}
 
 	bodySettings.mUserData = static_cast<uint64_t>(entity.id());
-	body = m_PhysicsWorld->CreateBody(bodySettings, true);
-	m_BodyID_To_EntityID[body.GetBodyID().GetIndexAndSequenceNumber()] = entity.id();
+	auto res = m_PhysicsWorld->CreateBody(bodySettings, true);
+	if (res)
+	{
+		body = std::move(res.value());
+		m_BodyID_To_EntityID[body.GetBodyID().GetIndexAndSequenceNumber()] = entity.id();
+	}
+	return res.has_value();
 }
 
 void aZero::Scene::Scene::UnregisterFromPhysics(flecs::entity entity, Physics::Body& body)
@@ -452,9 +706,9 @@ void aZero::Scene::Scene::ResolveCollisionEvents()
 	{
 		for (auto& event : m_PhysicsWorld->GetBodyActivatedEvents()) {
 			flecs::entity entity = m_World.entity(event.EntityID);
-			if (entity.is_alive() && entity.has<Component::Rigidbody>())
+			if (entity.is_alive() && entity.has<Component::RigidbodyComponent>())
 			{
-				Component::Rigidbody& rb = entity.get_mut<Component::Rigidbody>();
+				Component::RigidbodyComponent& rb = entity.get_mut<Component::RigidbodyComponent>();
 				if (rb.m_OnBodyActivated.has_value()) {
 					rb.m_OnBodyActivated.value()();
 				}
@@ -465,9 +719,9 @@ void aZero::Scene::Scene::ResolveCollisionEvents()
 			flecs::entity entity = m_World.entity(event.EntityID);
 			if (entity.is_alive())
 			{
-				if (entity.has<Component::Rigidbody>())
+				if (entity.has<Component::RigidbodyComponent>())
 				{
-					Component::Rigidbody& rb = entity.get_mut<Component::Rigidbody>();
+					Component::RigidbodyComponent& rb = entity.get_mut<Component::RigidbodyComponent>();
 					if (rb.m_OnBodyDeactivated.has_value()) {
 						rb.m_OnBodyDeactivated.value()();
 					}
@@ -481,10 +735,10 @@ void aZero::Scene::Scene::ResolveCollisionEvents()
 			flecs::entity secondEntity = m_World.entity(event.SecondEntityID);
 			if (firstEntity.is_alive() && secondEntity.is_alive())
 			{
-				if (firstEntity.has<Component::Rigidbody>() && secondEntity.has<Component::Rigidbody>())
+				if (firstEntity.has<Component::RigidbodyComponent>() && secondEntity.has<Component::RigidbodyComponent>())
 				{
-					Component::Rigidbody& firstRb = firstEntity.get_mut<Component::Rigidbody>();
-					Component::Rigidbody& secondRb = secondEntity.get_mut<Component::Rigidbody>();
+					Component::RigidbodyComponent& firstRb = firstEntity.get_mut<Component::RigidbodyComponent>();
+					Component::RigidbodyComponent& secondRb = secondEntity.get_mut<Component::RigidbodyComponent>();
 
 					if (firstRb.m_OnContactValidate.has_value()) {
 						firstRb.m_OnContactValidate.value()(secondRb.m_Body, event.InBaseOffset, event.InCollisionResult);
@@ -502,10 +756,10 @@ void aZero::Scene::Scene::ResolveCollisionEvents()
 			flecs::entity secondEntity = m_World.entity(event.SecondEntityID);
 			if (firstEntity.is_alive() && secondEntity.is_alive())
 			{
-				if (firstEntity.has<Component::Rigidbody>() && secondEntity.has<Component::Rigidbody>())
+				if (firstEntity.has<Component::RigidbodyComponent>() && secondEntity.has<Component::RigidbodyComponent>())
 				{
-					Component::Rigidbody& firstRb = firstEntity.get_mut<Component::Rigidbody>();
-					Component::Rigidbody& secondRb = secondEntity.get_mut<Component::Rigidbody>();
+					Component::RigidbodyComponent& firstRb = firstEntity.get_mut<Component::RigidbodyComponent>();
+					Component::RigidbodyComponent& secondRb = secondEntity.get_mut<Component::RigidbodyComponent>();
 
 					if (firstRb.m_OnContactAdded.has_value()) {
 						firstRb.m_OnContactAdded.value()(secondRb.m_Body, event.ContactManifold, event.ContactSettings);
@@ -524,10 +778,10 @@ void aZero::Scene::Scene::ResolveCollisionEvents()
 
 			if (firstEntity.is_alive() && secondEntity.is_alive())
 			{
-				if (firstEntity.has<Component::Rigidbody>() && secondEntity.has<Component::Rigidbody>())
+				if (firstEntity.has<Component::RigidbodyComponent>() && secondEntity.has<Component::RigidbodyComponent>())
 				{
-					Component::Rigidbody& firstRb = firstEntity.get_mut<Component::Rigidbody>();
-					Component::Rigidbody& secondRb = secondEntity.get_mut<Component::Rigidbody>();
+					Component::RigidbodyComponent& firstRb = firstEntity.get_mut<Component::RigidbodyComponent>();
+					Component::RigidbodyComponent& secondRb = secondEntity.get_mut<Component::RigidbodyComponent>();
 
 					if (firstRb.m_OnContactPersisted.has_value()) {
 						firstRb.m_OnContactPersisted.value()(secondRb.m_Body, event.ContactManifold, event.ContactSettings);
@@ -546,10 +800,10 @@ void aZero::Scene::Scene::ResolveCollisionEvents()
 				flecs::entity firstEntity = m_World.entity(m_BodyID_To_EntityID.at(event.InSubShapePair.GetBody1ID().GetIndexAndSequenceNumber()));
 				flecs::entity secondEntity = m_World.entity(m_BodyID_To_EntityID.at(event.InSubShapePair.GetBody2ID().GetIndexAndSequenceNumber()));
 
-				if (firstEntity.has<Component::Rigidbody>() && secondEntity.has<Component::Rigidbody>())
+				if (firstEntity.has<Component::RigidbodyComponent>() && secondEntity.has<Component::RigidbodyComponent>())
 				{
-					Component::Rigidbody& firstRb = firstEntity.get_mut<Component::Rigidbody>();
-					Component::Rigidbody& secondRb = secondEntity.get_mut<Component::Rigidbody>();
+					Component::RigidbodyComponent& firstRb = firstEntity.get_mut<Component::RigidbodyComponent>();
+					Component::RigidbodyComponent& secondRb = secondEntity.get_mut<Component::RigidbodyComponent>();
 
 					if (firstRb.m_OnContactRemoved.has_value()) {
 						firstRb.m_OnContactRemoved.value()(event.InSubShapePair);
@@ -567,7 +821,7 @@ void aZero::Scene::Scene::ResolveCollisionEvents()
 	}
 }
 
-std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Meshes(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset)
+std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Meshes(const std::filesystem::path& path, System::MeshSystem& mSystem, fastgltf::Asset* asset)
 {
 	// todo Lazy :)))) Fix this
 	aZero::ThreadPool tp(std::thread::hardware_concurrency());
@@ -575,17 +829,16 @@ std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Meshes(c
 	std::unordered_map<uint32_t, std::string> meshIndexToName;
 
 	std::vector<std::future<void>> handles(asset->meshes.size());
-	std::vector<Asset::MeshData> meshDataVec(asset->meshes.size());
+	std::vector<Asset::MeshletMeshData> meshDataVec(asset->meshes.size());
 
 	for (int c = 0; c < asset->meshes.size(); c++)
 	{
 		handles[c] = tp.AddJobA([c, asset, &meshDataVec, &path] {
 			const fastgltf::Mesh& mesh = asset->meshes[c];
-			const uint32_t numPrimitives = std::clamp((uint32_t)mesh.primitives.size(), 0u, Component::Mesh::s_MaxNumberOfSubmeshes); // Currently only supports atmost 10 submeshes
-			Asset::MeshData& meshData = meshDataVec[c];
-			meshData.FilePath = path.string();
+			const uint32_t numPrimitives = std::clamp((uint32_t)mesh.primitives.size(), 0u, Component::MeshComponent::s_MaxNumberOfSubmeshes); // Currently only supports atmost 10 submeshes
+			Asset::MeshletMeshData& meshData = meshDataVec[c];
 			meshData.Name = mesh.name.c_str();
-			meshData.m_Submeshes.resize(numPrimitives);
+			meshData.Submeshes.resize(numPrimitives);
 
 			uint32_t vertexOffset = 0;
 			for (int i = 0; i < numPrimitives; i++)
@@ -622,8 +875,7 @@ std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Meshes(c
 					continue;*/
 
 				fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(*asset, normalAccessor, [&vertexData](fastgltf::math::fvec3 n, std::size_t idx) {
-					const auto normal = Asset::PackNormal(Helper::EncodeNormalOctahedral({ n.x(), n.y(), n.z() }));
-					std::copy(normal.begin(), normal.end(), vertexData[idx].Normal);
+					vertexData[idx].Normal = Asset::PackNormal(Helpers::EncodeNormalOctahedral(glm::vec3(n.x(), n.y(), n.z())));
 					});
 
 				const std::string texcoordAttribute = std::string("TEXCOORD_") + std::to_string(baseColorTexcoordIndex);
@@ -634,8 +886,7 @@ std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Meshes(c
 						continue;*/
 
 					fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(*asset, texCoordAccessor, [&](fastgltf::math::fvec2 uv, std::size_t idx) {
-						const auto& u = Asset::PackUV({ uv.x(), uv.y() });
-						std::copy(u.begin(), u.end(), vertexData[idx].UV);
+						vertexData[idx].UV = Asset::PackUV({ uv.x(), uv.y() });
 						});
 				}
 
@@ -660,19 +911,19 @@ std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Meshes(c
 				}
 
 				std::vector<Asset::Meshlet> meshlets;
-				std::vector<DirectX::BoundingSphere> meshletBounds;
+				std::vector<BoundingVolume::BoundingSphere> meshletBounds;
 				Asset::Meshletize(vertexData, indices, meshlets, meshletBounds, vertexOffset);
 
-				Asset::SubmeshData newSubmesh;
+				Asset::MeshletSubMesh newSubmesh;
 				newSubmesh.Bounds = Asset::ComputeBoundingSphere(vertexData);
-				newSubmesh.MeshletOffset = meshData.m_VertexData.Meshlets.size();
+				newSubmesh.MeshletOffset = meshData.Meshlets.size();
 				newSubmesh.MeshletCount = meshlets.size();
 				vertexOffset += vertexData.size();
-				meshData.m_Submeshes[i] = newSubmesh;
+				meshData.Submeshes[i] = newSubmesh;
 
-				meshData.m_VertexData.Vertices.insert(meshData.m_VertexData.Vertices.end(), vertexData.begin(), vertexData.end());
-				meshData.m_VertexData.Meshlets.insert(meshData.m_VertexData.Meshlets.end(), meshlets.begin(), meshlets.end());
-				meshData.m_VertexData.MeshletBounds.insert(meshData.m_VertexData.MeshletBounds.end(), meshletBounds.begin(), meshletBounds.end());
+				meshData.Vertices.insert(meshData.Vertices.end(), vertexData.begin(), vertexData.end());
+				meshData.Meshlets.insert(meshData.Meshlets.end(), meshlets.begin(), meshlets.end());
+				meshData.MeshletBounds.insert(meshData.MeshletBounds.end(), meshletBounds.begin(), meshletBounds.end());
 			}
 		});
 	}
@@ -686,142 +937,141 @@ std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Meshes(c
 
 	for (int c = 0; c < asset->meshes.size(); c++)
 	{
-		Asset::MeshData& meshData = meshDataVec[c];
+		Asset::MeshletMeshData& meshData = meshDataVec[c];
 		meshIndexToName[c] = meshData.Name;
-		Asset::Mesh* m = assetManager.Create<Asset::Mesh>(meshIndexToName[c], std::move(meshData));
-		m->ClearCachedData();
+		mSystem.CreateMesh(meshData.Name, meshData);
 	}
 
 	return meshIndexToName;
 }
-
-std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Materials(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset, const std::unordered_map<uint32_t, std::string>& imageIndexToName)
-{
-	std::unordered_map<uint32_t, std::string> materialIndexToName;
-	for (int i = 0; i < asset->materials.size(); i++)
-	{
-		const fastgltf::Material& material = asset->materials[i];
-		materialIndexToName[i] = material.name;
-		Asset::MaterialData materialData;
-		materialData.Name = material.name;
-
-		if (material.pbrData.baseColorTexture.has_value()) {
-			auto imageIndex = asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.has_value() ? 
-				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.value() : 
-				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.value() :
-				std::numeric_limits<uint32_t>::max();
-
-			Asset::Texture* texture = nullptr;
-			if (imageIndexToName.contains(imageIndex)) {
-				texture = assetManager.GetOrDefault<Asset::Texture>(imageIndexToName.at(imageIndex));
-			}
-
-			materialData.Info.AlbedoTexture = texture;
-		}
-
-		if (!materialData.Info.AlbedoTexture) {
-			Asset::Texture* texture = assetManager.GetOrDefault<Asset::Texture>("Fallback");
-			std::cout << "Fallback albedo texture used for material: " << materialData.Name << "\n";
-			materialData.Info.AlbedoTexture = texture;
-		}
-
-		if (material.normalTexture.has_value()) {
-			auto imageIndex = asset->textures[material.normalTexture.value().textureIndex].imageIndex.has_value() ?
-				asset->textures[material.normalTexture.value().textureIndex].imageIndex.value() :
-				asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.value() :
-				std::numeric_limits<uint32_t>::max();
-
-			Asset::Texture* texture = nullptr;
-			if (imageIndexToName.contains(imageIndex)) {
-				texture = assetManager.GetOrDefault<Asset::Texture>(imageIndexToName.at(imageIndex));
-			}
-			materialData.Info.NormalTexture = texture;
-		}
-
-		if (!materialData.Info.NormalTexture) {
-			Asset::Texture* texture = assetManager.GetOrDefault<Asset::Texture>("FallbackNormalMap");
-			std::cout << "Fallback normal map used for material: " << materialData.Name << "\n";
-			materialData.Info.NormalTexture = texture;
-		}
-
-		if (material.pbrData.metallicRoughnessTexture.has_value()) {
-			//uint32_t textureIndex = material.pbrData.metallicRoughnessTexture.value().textureIndex;
-			// todo Lookup texture in asset manager and set ptr
-			materialData.Info.MetallicRoughnessTexture = nullptr;
-		}
-
-		materialData.Info.RoughnessFactor = material.pbrData.roughnessFactor;
-		materialData.Info.MetallicFactor = material.pbrData.metallicFactor;
-
-		materialIndexToName[i] = materialData.Name;
-		Asset::Material* mat = assetManager.Create<Asset::Material>(materialIndexToName[i], std::move(materialData));
-	}
-
-	return materialIndexToName;
-}
-
-std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Textures(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset)
-{
-	// todo Lazy :)))) Fix this
-	aZero::ThreadPool tp(std::thread::hardware_concurrency());
-
-	std::unordered_map<uint32_t, std::string> imageIndexToName;
-
-	std::vector<std::future<void>> handles(asset->images.size());
-
-	std::vector<Asset::TextureData> textureDataVec(asset->images.size());
-	for (int i = 0; i < asset->images.size(); i++)
-	{
-		handles[i] = tp.AddJobA([i, asset, &textureDataVec, &path] {
-			Asset::TextureData& textureData = textureDataVec[i];
-			const fastgltf::Image& image = asset->images[i];
-
-			std::visit(fastgltf::visitor{
-				[](const auto& arg) {},
-				[&textureData, &path](const fastgltf::sources::URI& filePath) {
-					// todo Figure out how to handle formatting
-					textureData.CreateFromFile(path.parent_path() / std::filesystem::path(filePath.uri.path()));
-				},
-				[&textureData, &image](const fastgltf::sources::Array& vector) {
-					textureData.LoadFromMemory(image.name.c_str(), vector.bytes.data(), vector.bytes.size(), 0);
-				},
-				[asset, &textureData, &image](const fastgltf::sources::BufferView& view) {
-					auto& bufferView = asset->bufferViews[view.bufferViewIndex];
-					auto& buffer = asset->buffers[bufferView.bufferIndex];
-					std::visit(fastgltf::visitor{
-						[](const auto& arg) {},
-						[&](const fastgltf::sources::Array& vector) {
-							textureData.LoadFromMemory(image.name.c_str(), vector.bytes.data(), bufferView.byteLength, bufferView.byteOffset);
-						}
-					}, buffer.data);
-				}
-				}, image.data);
-		});
-	}
-
-	std::cout << "Waiting on texture loading + decoding...\n";
-	for (auto& handle : handles)
-	{
-		handle.wait();
-	}
-	std::cout << "Creating texture resources...\n";
-
-	for (int i = 0; i < asset->images.size(); i++)
-	{
-		Asset::TextureData& textureData = textureDataVec[i];
-		if (textureData.Data.size()) {
-			imageIndexToName[i] = textureData.FilePath.generic_string();
-			Asset::Texture* tex = assetManager.Create<Asset::Texture>(imageIndexToName[i], std::move(textureData));
-			tex->ClearCachedData();
-		}
-	}
-
-	return imageIndexToName;
-}
-
-#include <chrono>
-
-bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager)
+//
+//std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Materials(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset, const std::unordered_map<uint32_t, std::string>& imageIndexToName)
+//{
+//	std::unordered_map<uint32_t, std::string> materialIndexToName;
+//	for (int i = 0; i < asset->materials.size(); i++)
+//	{
+//		const fastgltf::Material& material = asset->materials[i];
+//		materialIndexToName[i] = material.name;
+//		Asset::MaterialData materialData;
+//		materialData.Name = material.name;
+//
+//		if (material.pbrData.baseColorTexture.has_value()) {
+//			auto imageIndex = asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.has_value() ? 
+//				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.value() : 
+//				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.value() :
+//				std::numeric_limits<uint32_t>::max();
+//
+//			Asset::Texture* texture = nullptr;
+//			if (imageIndexToName.contains(imageIndex)) {
+//				texture = assetManager.GetOrDefault<Asset::Texture>(imageIndexToName.at(imageIndex));
+//			}
+//
+//			materialData.Info.AlbedoTexture = texture;
+//		}
+//
+//		if (!materialData.Info.AlbedoTexture) {
+//			Asset::Texture* texture = assetManager.GetOrDefault<Asset::Texture>("Fallback");
+//			std::cout << "Fallback albedo texture used for material: " << materialData.Name << "\n";
+//			materialData.Info.AlbedoTexture = texture;
+//		}
+//
+//		if (material.normalTexture.has_value()) {
+//			auto imageIndex = asset->textures[material.normalTexture.value().textureIndex].imageIndex.has_value() ?
+//				asset->textures[material.normalTexture.value().textureIndex].imageIndex.value() :
+//				asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.value() :
+//				std::numeric_limits<uint32_t>::max();
+//
+//			Asset::Texture* texture = nullptr;
+//			if (imageIndexToName.contains(imageIndex)) {
+//				texture = assetManager.GetOrDefault<Asset::Texture>(imageIndexToName.at(imageIndex));
+//			}
+//			materialData.Info.NormalTexture = texture;
+//		}
+//
+//		if (!materialData.Info.NormalTexture) {
+//			Asset::Texture* texture = assetManager.GetOrDefault<Asset::Texture>("FallbackNormalMap");
+//			std::cout << "Fallback normal map used for material: " << materialData.Name << "\n";
+//			materialData.Info.NormalTexture = texture;
+//		}
+//
+//		if (material.pbrData.metallicRoughnessTexture.has_value()) {
+//			//uint32_t textureIndex = material.pbrData.metallicRoughnessTexture.value().textureIndex;
+//			// todo Lookup texture in asset manager and set ptr
+//			materialData.Info.MetallicRoughnessTexture = nullptr;
+//		}
+//
+//		materialData.Info.RoughnessFactor = material.pbrData.roughnessFactor;
+//		materialData.Info.MetallicFactor = material.pbrData.metallicFactor;
+//
+//		materialIndexToName[i] = materialData.Name;
+//		Asset::Material* mat = assetManager.Create<Asset::Material>(materialIndexToName[i], std::move(materialData));
+//	}
+//
+//	return materialIndexToName;
+//}
+//
+//std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Textures(const std::filesystem::path& path, Asset::AssetManager<std::string>& assetManager, fastgltf::Asset* asset)
+//{
+//	// todo Lazy :)))) Fix this
+//	aZero::ThreadPool tp(std::thread::hardware_concurrency());
+//
+//	std::unordered_map<uint32_t, std::string> imageIndexToName;
+//
+//	std::vector<std::future<void>> handles(asset->images.size());
+//
+//	std::vector<Asset::TextureData> textureDataVec(asset->images.size());
+//	for (int i = 0; i < asset->images.size(); i++)
+//	{
+//		handles[i] = tp.AddJobA([i, asset, &textureDataVec, &path] {
+//			Asset::TextureData& textureData = textureDataVec[i];
+//			const fastgltf::Image& image = asset->images[i];
+//
+//			std::visit(fastgltf::visitor{
+//				[](const auto& arg) {},
+//				[&textureData, &path](const fastgltf::sources::URI& filePath) {
+//					// todo Figure out how to handle formatting
+//					textureData.CreateFromFile(path.parent_path() / std::filesystem::path(filePath.uri.path()));
+//				},
+//				[&textureData, &image](const fastgltf::sources::Array& vector) {
+//					textureData.LoadFromMemory(image.name.c_str(), vector.bytes.data(), vector.bytes.size(), 0);
+//				},
+//				[asset, &textureData, &image](const fastgltf::sources::BufferView& view) {
+//					auto& bufferView = asset->bufferViews[view.bufferViewIndex];
+//					auto& buffer = asset->buffers[bufferView.bufferIndex];
+//					std::visit(fastgltf::visitor{
+//						[](const auto& arg) {},
+//						[&](const fastgltf::sources::Array& vector) {
+//							textureData.LoadFromMemory(image.name.c_str(), vector.bytes.data(), bufferView.byteLength, bufferView.byteOffset);
+//						}
+//					}, buffer.data);
+//				}
+//				}, image.data);
+//		});
+//	}
+//
+//	std::cout << "Waiting on texture loading + decoding...\n";
+//	for (auto& handle : handles)
+//	{
+//		handle.wait();
+//	}
+//	std::cout << "Creating texture resources...\n";
+//
+//	for (int i = 0; i < asset->images.size(); i++)
+//	{
+//		Asset::TextureData& textureData = textureDataVec[i];
+//		if (textureData.Data.size()) {
+//			imageIndexToName[i] = textureData.FilePath.generic_string();
+//			Asset::Texture* tex = assetManager.Create<Asset::Texture>(imageIndexToName[i], std::move(textureData));
+//			tex->ClearCachedData();
+//		}
+//	}
+//
+//	return imageIndexToName;
+//}
+//
+//#include <chrono>
+//
+bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, System::MeshSystem& meshSystem, System::MaterialSystem& matSystem, System::TextureSystem& tSystem)
 {
 	static constexpr auto supportedExtensions =
 		fastgltf::Extensions::KHR_mesh_quantization |
@@ -864,7 +1114,7 @@ bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, Asset::Ass
 	// ------------------------------------------------------------------------------------------------------------------------------------------------
 	std::cout << "------------------------------------\nTextures loading... ";
 
-	std::unordered_map<uint32_t, std::string> textureIndexToName = this->LoadGltf_Textures(path, assetManager, asset);
+	//std::unordered_map<uint32_t, std::string> textureIndexToName = this->LoadGltf_Textures(path, assetManager, asset);
 
 	auto end = clock.now();
 	std::chrono::duration<double> diff = end - start;
@@ -877,7 +1127,7 @@ bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, Asset::Ass
 
 	std::cout << "------------------------------------\nMeshes loading... ";
 
-	std::unordered_map<uint32_t, std::string> meshIndexToName = this->LoadGltf_Meshes(path, assetManager, asset);
+	std::unordered_map<uint32_t, std::string> meshIndexToName = this->LoadGltf_Meshes(path, meshSystem, asset);
 
 	end = clock.now();
 	diff = end - start;
@@ -890,7 +1140,7 @@ bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, Asset::Ass
 
 	std::cout << "------------------------------------\nMaterials loading... ";
 
-	std::unordered_map<uint32_t, std::string> materialIndexToName = this->LoadGltf_Materials(path, assetManager, asset, textureIndexToName);
+	//std::unordered_map<uint32_t, std::string> materialIndexToName = this->LoadGltf_Materials(path, assetManager, asset, textureIndexToName);
 
 	end = clock.now();
 	diff = end - start;
@@ -910,13 +1160,14 @@ bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, Asset::Ass
 			std::visit(fastgltf::visitor{
 				[](const auto& arg) {},
 				[&](const fastgltf::TRS& tf) {
-					Component::Position position(tf.translation.x(), tf.translation.y(), tf.translation.z());
-					Component::Rotation rotation(DXM::Quaternion(tf.rotation.x(), tf.rotation.y(), tf.rotation.z(), tf.rotation.w()).ToEuler());
-					Component::Scale scale(tf.scale.x(), tf.scale.y(), tf.scale.z());
-					entity.set<Component::Position>(position);
-					entity.set<Component::Rotation>(rotation);
-					entity.set<Component::Scale>(scale);
-					entity.add<Component::Static>();
+					Component::PositionComponent position(tf.translation.x(), tf.translation.y(), tf.translation.z());
+					glm::quat rotQuat(tf.rotation.w(), tf.rotation.x(), tf.rotation.y(), tf.rotation.z()); // glm::quat takes w as the first param while fastgltf takes it as the last... makes no sense when glm stores w last... bruv
+					glm::vec3 rotation = glm::degrees(glm::eulerAngles(rotQuat));
+					Component::ScaleComponent scale(tf.scale.x(), tf.scale.y(), tf.scale.z());
+					entity.set<Component::PositionComponent>(position);
+					entity.set<Component::RotationComponent>(rotation);
+					entity.set<Component::ScaleComponent>(scale);
+					entity.add<Component::StaticComponent>();
 				},
 				[&](const fastgltf::math::fmat4x4& tf) {
 
@@ -924,73 +1175,74 @@ bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, Asset::Ass
 				}, node.transform);
 
 			if (node.meshIndex.has_value()) {
-				Asset::Mesh* mesh = assetManager.GetOrDefault<Asset::Mesh>(meshIndexToName[node.meshIndex.value()]);
-				if (mesh) {
-					Asset::Material* material = assetManager.GetOrDefault<Asset::Material>(materialIndexToName[asset->meshes[node.meshIndex.value()].primitives[0].materialIndex.value()]);
-					Component::Mesh meshComponent(*mesh, *material);
+				auto mesh = meshSystem.GetMesh(meshIndexToName[node.meshIndex.value()]);
+				auto material = matSystem.GetMaterialInstance("MyMaterialInstance");
+				if (mesh && material) {
+					//Asset::Material* material = assetManager.GetOrDefault<Asset::Material>(materialIndexToName[asset->meshes[node.meshIndex.value()].primitives[0].materialIndex.value()]);
+					Component::MeshComponent meshComponent(mesh.value().get(), material.value().get());
 					for (int32_t i = 0; i < meshComponent.m_NumSubmeshes; i++)
 					{
-						meshComponent.SetMaterial(i, *assetManager.GetOrDefault<Asset::Material>(materialIndexToName[asset->meshes[node.meshIndex.value()].primitives[i].materialIndex.value()]));
+						meshComponent.SetMaterial(i, material.value());
 					}
-					entity.set<Component::Mesh>(meshComponent);
+					entity.set<Component::MeshComponent>(meshComponent);
 				}
 			}
-			if (node.cameraIndex.has_value()) {
-				const fastgltf::Camera& camera = asset->cameras[node.cameraIndex.value()];
-				std::visit(fastgltf::visitor{
-					[](const auto& arg) {},
-					[&](const fastgltf::Camera::Perspective& perspective) {
-						Component::Camera cameraComponent(Component::Camera::EProjectionType::Perspective, static_cast<float>(perspective.yfov),
-							static_cast<float>(perspective.znear), perspective.zfar.has_value() ? static_cast<float>(perspective.zfar.value()) : 1000.f /* default to 1000.f */,
-							//perspective.aspectRatio.has_value() ? static_cast<float>(perspective.aspectRatio.value()) : 16.f / 9.f /* default to 16:9 */,
-							true, Helper::Rectangle(0,0,800,600)); // todo Handle loading with aspect ratio instead of hardcoding width and height
-						entity.set<Component::Camera>(cameraComponent);
-					},
-					[&](const fastgltf::Camera::Orthographic orthographic) {
-						Component::Camera cameraComponent(Component::Camera::EProjectionType::Ortographic, 0.f,
-							static_cast<float>(orthographic.znear), static_cast<float>(orthographic.zfar),
-							true, Helper::Rectangle(0,0,800,600)); // todo Handle loading using orthographic.xmag and orthographic.ymag
-						entity.set<Component::Camera>(cameraComponent);
-					}
-					}, camera.camera);
-			}
-			if (node.lightIndex.has_value()) {
-				const fastgltf::Light& light = asset->lights[node.lightIndex.value()];
-				switch (light.type)
-				{
-				case fastgltf::LightType::Point:
-				{
-					Component::PointLight p;
-					p.color = { light.color.x(), light.color.y(), light.color.z() };
-					p.intensity = light.intensity;
-					entity.set<Component::PointLight>(p);
-					break;
-				}
-				case fastgltf::LightType::Spot:
-				{
-					Component::SpotLight p;
-					p.color = { light.color.x(), light.color.y(), light.color.z() };
-					p.intensity = light.intensity;
+			//if (node.cameraIndex.has_value()) {
+			//	const fastgltf::Camera& camera = asset->cameras[node.cameraIndex.value()];
+			//	std::visit(fastgltf::visitor{
+			//		[](const auto& arg) {},
+			//		[&](const fastgltf::Camera::Perspective& perspective) {
+			//			Component::CameraComponent cameraComponent(Component::CameraComponent::EProjectionType::Perspective, static_cast<float>(perspective.yfov),
+			//				static_cast<float>(perspective.znear), perspective.zfar.has_value() ? static_cast<float>(perspective.zfar.value()) : 1000.f /* default to 1000.f */,
+			//				//perspective.aspectRatio.has_value() ? static_cast<float>(perspective.aspectRatio.value()) : 16.f / 9.f /* default to 16:9 */,
+			//				true, Helper::Rectangle(0,0,800,600)); // todo Handle loading with aspect ratio instead of hardcoding width and height
+			//			entity.set<Component::CameraComponent>(cameraComponent);
+			//		},
+			//		[&](const fastgltf::Camera::Orthographic orthographic) {
+			//			Component::CameraComponent cameraComponent(Component::Camera::EProjectionType::Ortographic, 0.f,
+			//				static_cast<float>(orthographic.znear), static_cast<float>(orthographic.zfar),
+			//				true, Helper::Rectangle(0,0,800,600)); // todo Handle loading using orthographic.xmag and orthographic.ymag
+			//			entity.set<Component::CameraComponent>(cameraComponent);
+			//		}
+			//		}, camera.camera);
+			//}
+			//if (node.lightIndex.has_value()) {
+			//	const fastgltf::Light& light = asset->lights[node.lightIndex.value()];
+			//	switch (light.type)
+			//	{
+			//	case fastgltf::LightType::Point:
+			//	{
+			//		Component::PointLightComponent p;
+			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
+			//		p.intensity = light.intensity;
+			//		entity.set<Component::PointLight>(p);
+			//		break;
+			//	}
+			//	case fastgltf::LightType::Spot:
+			//	{
+			//		Component::SpotLightComponent p;
+			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
+			//		p.intensity = light.intensity;
 
-					// todo Figure out which ones that should be used and how
-					/*p.coneAngle = light.innerConeAngle.has_value() ? light.innerConeAngle.value() : 0.f;
-					p.coneAngle = light.outerConeAngle.has_value() ? light.outerConeAngle.value() : 0.f;*/
+			//		// todo Figure out which ones that should be used and how
+			//		/*p.coneAngle = light.innerConeAngle.has_value() ? light.innerConeAngle.value() : 0.f;
+			//		p.coneAngle = light.outerConeAngle.has_value() ? light.outerConeAngle.value() : 0.f;*/
 
-					entity.set<Component::SpotLight>(p);
-					break;
-				}
-				case fastgltf::LightType::Directional:
-				{
-					Component::DirectionalLight p;
-					p.color = { light.color.x(), light.color.y(), light.color.z() };
-					p.intensity = light.intensity;
-					entity.set<Component::DirectionalLight>(p);
-					break;
-				}
-				default:
-					break;
-				}
-			}
+			//		entity.set<Component::SpotLightComponent>(p);
+			//		break;
+			//	}
+			//	case fastgltf::LightType::Directional:
+			//	{
+			//		Component::DirectionalLightComponent p;
+			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
+			//		p.intensity = light.intensity;
+			//		entity.set<Component::DirectionalLightComponent>(p);
+			//		break;
+			//	}
+			//	default:
+			//		break;
+			//	}
+			//}
 		});
 
 	end = clock.now();

@@ -1,26 +1,25 @@
-#include "Geo_Draw_Structs.slang"
+import Draw_Structs;
+import Cross_Pipeline_Structs;
+import Volumes;
 
 groupshared Payload payload;
 
 [shader("task")]
-[NumThreads(THREAD_COUNT_X, 1, 1)]
+[NumThreads(g_ThreadCount, 1, 1)]
 void asMain(uint3 dtid: SV_DispatchThreadID, uint3 gid: SV_GroupThreadID, uint32_t drawIndex : SV_DrawIndex)
 {
-    uint32_t drawid = drawIndex;
     DrawMetaData *drawDataBuffer = (DrawMetaData *)Constants.DrawMetadataBufferPtr;
-    DrawMetaData drawData = drawDataBuffer[drawid];
+    DrawMetaData drawData = drawDataBuffer[drawIndex];
 
     bool visible = false;
 
     if (dtid.x < drawData.MeshletCount)
     {
-        BoundingSphere *meshletBoundsBuffer = (BoundingSphere *)Constants.MeshletBoundBufferPtr;
         CameraData *camera = (CameraData *)Constants.CameraBufferPtr;
-        InstanceData *instanceDataBuffer = (InstanceData *)Constants.InstanceDataBufferPtr;
-        InstanceData instanceData = instanceDataBuffer[drawData.InstanceIndex];
+        InstanceData *instanceData = (InstanceData*)Constants.InstanceDataBufferPtr;
+        BoundingSphere* meshletBounds = (BoundingSphere *)instanceData.MeshletBoundsBDA;
 
-        BoundingSphere meshletBounds = meshletBoundsBuffer[drawData.InstanceIndex + dtid.x];
-        // visible = camera.Frustum.Intersects( CreateBoundingSphere(mul(instanceData.WorldMatrix, float4(meshletBounds.Position, 1.f)).xyz, meshletBounds.Radius), camera->ViewMatrix);
+        // visible = camera.Frustum.Intersects( CreateBoundingSphere(mul(instanceData[drawIndex].WorldMatrix, float4(meshletBounds[dtid.x].Position, 1.f)).xyz, meshletBounds[dtid.x].Radius), camera->ViewMatrix);
         visible = true;
         if (visible)
         {

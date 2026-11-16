@@ -32,7 +32,10 @@ namespace aZero::Editor
 				.EnableValidationLayer = true,
 				.EnableValidationLayerWarnings = false
 			};
+
 			m_Engine = std::make_unique<Engine>(engineDesc);
+
+			m_Engine->GetRenderer().NextFrame();
 
 			m_MainWindow = std::make_unique<RenderWindow>(Window::WindowDesc("aZero Engine", { 0,0,1920,1080 }, { 1,1,0,1 }, SDL_WINDOW_RESIZABLE, {}), m_Engine->GetCore(), m_Engine->GetRenderer());
 
@@ -63,81 +66,109 @@ namespace aZero::Editor
 
 
 			// ---------------------------------------
+			m_Scene = std::make_unique<Scene::Scene>();
+			Component::PositionComponent p;
+			Component::RotationComponent r;
+			Component::ScaleComponent s;
 
-			static constexpr auto supportedExtensions =
-				fastgltf::Extensions::KHR_mesh_quantization |
-				fastgltf::Extensions::KHR_texture_transform |
-				fastgltf::Extensions::KHR_materials_variants |
-				fastgltf::Extensions::KHR_lights_punctual |
-				fastgltf::Extensions::KHR_texture_basisu
-				;
-
-			fastgltf::Parser parser(supportedExtensions);
-
-			constexpr auto gltfOptions =
-				fastgltf::Options::DontRequireValidAssetMember |
-				fastgltf::Options::AllowDouble |
-				fastgltf::Options::LoadExternalBuffers |
-				//fastgltf::Options::LoadExternalImages |
-				fastgltf::Options::GenerateMeshIndices |
-				fastgltf::Options::DecomposeNodeMatrices
-				;
-
-			const std::filesystem::path path(std::string(PROJECT_DIRECTORY) + "KtxCube.gltf");
-			auto gltfFile = fastgltf::MappedGltfFile::FromPath(path);
-			if (!bool(gltfFile)) {
-				std::cerr << "Failed to open glTF file: " << fastgltf::getErrorMessage(gltfFile.error()) << '\n';
-				throw;
-			}
-
-			auto loadedAsset = parser.loadGltf(gltfFile.get(), path.parent_path(), gltfOptions);
-			fastgltf::Asset* asset = loadedAsset.get_if();
-			if (!asset) {
-				std::cerr << "Failed to load glTF file: " << fastgltf::getErrorMessage(loadedAsset.error()) << '\n';
-				throw;
-			}
-
-			auto& meshSystem = m_Engine->GetMeshSystem();
-			auto& textureSystem = m_Engine->GetTextureSystem();
-			auto& materialSystem = m_Engine->GetMaterialSystem();
-
-			Asset::ImageData imageData = aZero::File::ExtractGltfImage(asset->images[0], asset, path);
-			auto texture = textureSystem.CreateTexture("MyTexture", imageData);
-			if (texture)
 			{
-				Asset::MaterialDefinition def{
-				.Parameters = {
-					{"float1", Asset::ParameterType::float1},
-					{"int3", Asset::ParameterType::int3},
-					{"texture", Asset::ParameterType::tex2D}
-				},
-				.Properties = 0,
-				.MaterialShaderPath = std::string(ENGINE_SHADER_DIRECTORY) + "/testMaterial.slang",
-				.MaterialShaderName = "TestMaterial2"
+				auto ent = m_Scene->GetWorld().entity("mesh");
+				p.Position = { 0,0,0 };
+				r.Rotation = { 0,0,0 };
+				s.Scale = { 1,1,1 };
+				
+				ent.set(p);
+				ent.set(r);
+				ent.set(s);
+				Component::MeshComponent m(m_Engine->GetMeshSystem().GetMesh("MyMesh").value().get(), m_Engine->GetMaterialSystem().GetMaterialInstance("MyMaterialInstance").value().get());
+				ent.set(m);
+				ent.add<Component::StaticComponent>();
+			}
+
+			{
+				auto ent = m_Scene->GetWorld().entity("mesh2");
+				p.Position = { 0,0.3,0 };
+				r.Rotation = { 0,45,45 };
+				s.Scale = { 1,1,1 };
+				ent.set(p);
+				ent.set(r);
+				ent.set(s);
+				Component::MeshComponent m(m_Engine->GetMeshSystem().GetMesh("MyMesh").value().get(), m_Engine->GetMaterialSystem().GetMaterialInstance("MyMaterialInstance").value().get());
+				ent.set(m);
+				ent.add<Component::StaticComponent>();
+			}
+
+			{
+				auto ent = m_Scene->GetWorld().entity("mesh3");
+				p.Position = { 0,6,1 };
+				r.Rotation = { 0,0,0 };
+				s.Scale = { 0.5,0.5,0.5 };
+
+				Component::PointLightComponent pLight{
+					.Color = glm::vec3(1, 1, 1),
+					.Range = 2.f,
+					.Falloff = 0.f,
+					.Intensity = 1.f
 				};
+				ent.set(pLight);
+				ent.set(p);
+				ent.set(r);
+				ent.set(s);
+				Component::MeshComponent m(m_Engine->GetMeshSystem().GetMesh("MyMesh").value().get(), m_Engine->GetMaterialSystem().GetMaterialInstance("MyMaterialInstance").value().get());
+				ent.set(m);
+			}
 
-				auto material = materialSystem.CreateMaterial("MyMaterialType", def);
-				if (material)
-				{
-					auto materialInstance = materialSystem.CreateMaterialInstance("MyMaterialInstance", material->get());
-					if (materialInstance)
-					{
-						materialInstance->get().SetParameter("float1", 6.7f);
-						materialInstance->get().SetParameter("int3", glm::ivec3(1, 2, 3));
-						materialInstance->get().SetParameter("texture", texture->get().GetDescriptorIndex());
+			{
+				auto cam = m_Scene->GetWorld().entity("camera2");
+				Component::CameraComponent camera{
+						.m_Type = Component::ECameraType::PERSPECTIVE,
+						.m_PriorityIndex = 0,
+						.m_Fov = M_PI - 1,
+						.m_Top = 0.5f,
+						.m_Left = 0.5f,
+						.m_Bottom = 1.f,
+						.m_Right = 1.f,
+						.m_Near = 0.001f,
+						.m_Far = 1000.f,
+						.m_OptColorTarget = m_ColorTarget,
+						.m_OptDepthStencilTarget = m_DepthStencilTarget,
+						.m_ClearColorTargetOnRender = false,
+						.m_ClearDepthStencilTargetOnRender = false
+				};
+				p.Position.z = 5;
+				cam.set(p);
+				cam.set(r);
+				cam.set(camera);
+				cam.add<Component::StaticComponent>();
+			}
 
-						m_Engine->GetRenderer().testMaterialPtr = materialInstance->get().GetBDA();
+			m_Scene = std::make_unique<Scene::Scene>();
+			m_Scene->LoadGltf(std::string(PROJECT_DIRECTORY) + "scenes/Sponza.gltf", m_Engine->GetMeshSystem(), m_Engine->GetMaterialSystem(), m_Engine->GetTextureSystem());
 
-						Asset::MeshletMeshData meshData = aZero::File::ExtractGltfMeshletMesh(asset->meshes[0], asset);
-						auto mesh = meshSystem.CreateMesh("MyMesh", meshData);
-						if (mesh)
-						{
-							// todo Create test entity that will get rendered
-							int x = 2;
-						}
-					}
-				}
-				texture->get().SetData(imageData);
+
+			{
+				p.Position = { 0,0,1 };
+				r.Rotation = { 0,0,0 };
+				auto cam = m_Scene->GetWorld().entity("camera");
+				Component::CameraComponent camera{
+						.m_Type = Component::ECameraType::PERSPECTIVE,
+						.m_PriorityIndex = 1,
+						.m_Fov = M_PI / 3.f,
+						.m_Top = 0.0f,
+						.m_Left = 0.0f,
+						.m_Bottom = 1.f,
+						.m_Right = 1.f,
+						.m_Near = 0.001f,
+						.m_Far = 1000.f,
+						.m_OptColorTarget = m_ColorTarget,
+						.m_OptDepthStencilTarget = m_DepthStencilTarget,
+						.m_ClearColorTargetOnRender = true,
+						.m_ClearDepthStencilTargetOnRender = true
+				};
+				cam.set(p);
+				cam.set(r);
+				cam.set(camera);
+				cam.add<Component::StaticComponent>();
 			}
 
 			m_Engine->GetRenderer().FinalizeFrame();
@@ -145,6 +176,8 @@ namespace aZero::Editor
 
 		~Editor()
 		{
+			m_Scene.reset();
+			m_Engine->GetRenderer().FlushRenderingCommands();
 			aZero::Window::Shutdown();
 		}
 
@@ -158,6 +191,7 @@ namespace aZero::Editor
 
 		void Update()
 		{
+			static float idk = 0.01f;
 			while (!m_Engine->GetRenderer().NextFrame(UINT64_MAX))
 			{
 				// do work while waiting
@@ -169,13 +203,39 @@ namespace aZero::Editor
 
 			// do frame stuff
 
+			/*auto ent = m_Scene->GetWorld().entity("mesh3");
+			ent.get_mut<Component::RotationComponent>().Rotation.y += 0.1f;
+			ent.get_mut<Component::PositionComponent>().Position.z = sin(idk) * 4;*/
+			auto cam = m_Scene->GetWorld().entity("camera");
+			if (GetAsyncKeyState('W'))
+			{
+				cam.get_mut<Component::PositionComponent>().Position.z -= idk;
+			}
+			if (GetAsyncKeyState('S'))
+			{
+				cam.get_mut<Component::PositionComponent>().Position.z += idk;
+			}
+			if (GetAsyncKeyState('A'))
+			{
+				cam.get_mut<Component::PositionComponent>().Position.x -= idk;
+			}
+			if (GetAsyncKeyState('D'))
+			{
+				cam.get_mut<Component::PositionComponent>().Position.x += idk;
+			}
+			if (GetAsyncKeyState(VK_SPACE))
+			{
+				cam.get_mut<Component::PositionComponent>().Position.y += idk;
+			}
+			if (GetAsyncKeyState(VK_LSHIFT))
+			{
+				cam.get_mut<Component::PositionComponent>().Position.y -= idk;
+			}
+			m_Scene->MarkStaticMeshesDirty();
+
 			m_Engine->GetRenderer().FinalizeFrame();
 
-			Renderer::Renderer::RenderDesc renderDesc{
-				.ColorTarget = &m_ColorTarget,
-				.DepthStencil = &m_DepthStencilTarget
-			};
-			m_Engine->GetRenderer().Render(renderDesc);
+			m_Engine->GetRenderer().RenderScene(*m_Scene.get());
 
 			m_Engine->GetRenderer().CopyToSwapchain(m_ColorTarget, m_MainWindow->m_SwapChain);
 
@@ -183,10 +243,12 @@ namespace aZero::Editor
 		}
 
 	private:
-
+		flecs::entity cameraEnt;
+		flecs::entity meshEnt;
+		std::unique_ptr<aZero::Scene::Scene> m_Scene;
+		std::unique_ptr<Engine> m_Engine;
 		Renderer::RenderTarget m_ColorTarget;
 		Renderer::RenderTarget m_DepthStencilTarget;
-		std::unique_ptr<Engine> m_Engine;
 		std::unique_ptr<RenderWindow> m_MainWindow;
 		uint64_t m_FrameIndex = 0;
 		Input::KeyboardListener m_KeyboardListener;

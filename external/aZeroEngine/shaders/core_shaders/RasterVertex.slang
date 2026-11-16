@@ -10,7 +10,7 @@ public struct RasterVertex
     public float2 UV : UV;
     public float3 Normal : NORMAL;
     public float3 Meshletid : MESHLET_ID;
-    public nointerpolation uint32_t MaterialIndex : MATERIAL_INDEX;
+    public nointerpolation uint64_t MaterialPtr : MATERIAL_INDEX;
 };
 
 #endif

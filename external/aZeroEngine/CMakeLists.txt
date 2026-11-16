@@ -199,6 +199,7 @@ add_library(${PROJECT_NAME}
     "src/physics/PhysicsWorld.cpp"
     "src/render_api/CommandPool.cpp"
     "src/render_api/VolkImpl.cpp"
+    "src/scene/Scene.cpp"
 )
 
 target_sources(${PROJECT_NAME} PUBLIC ${ENGINE_HEADERS})

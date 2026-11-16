@@ -36,6 +36,14 @@ namespace aZero::Renderer
 			return *this;
 		}
 
+		glm::uvec2 GetDimensions() const
+		{
+			glm::uvec2 dims;
+			dims.x = m_Image.GetDesc().Width;
+			dims.y = m_Image.GetDesc().Height;
+			return dims;
+		}
+
 	private:
 		bool Init(ERenderTargetType type, const glm::uvec2& dimensions, RenderAPI::Core& core, aZero::Renderer::ResourceRecycler& resourceRecycler)
 		{
