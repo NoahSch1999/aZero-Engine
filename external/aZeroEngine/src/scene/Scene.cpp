@@ -10,7 +10,7 @@
 
 #include "misc/ThreadPool.hpp"
 #include <glm/gtx/euler_angles.hpp>
-#include "asset/loading_saving/ImageLoading.hpp"
+#include "asset/loading_saving/Gltf.hpp"
 
 glm::mat4x4 CreateWorldMatrix(const glm::vec3 position, const glm::vec3 rotation, const glm::vec3 scale)
 {
@@ -71,7 +71,7 @@ aZero::Scene::Scene::~Scene()
 	m_CameraQuery = {};
 	m_ApplyPhysicsQuery = {};
 	m_TriggerbodyQuery = {};
-	m_RootEntityQuery = {};
+	//m_RootEntityQuery = {};
 
 	if (m_PhysicsWorld.get())
 	{
@@ -100,7 +100,7 @@ void aZero::Scene::Scene::Init()
 	m_World.component<Component::TriggerbodyComponent>();
 	m_World.component<Component::StaticComponent>();
 
-	m_RootEntityQuery = m_World.query_builder<>()
+	/*m_RootEntityQuery = m_World.query_builder<>()
 		.with<Component::PositionComponent>().oper(flecs::Or)
 		.with<Component::RotationComponent>().oper(flecs::Or)
 		.with<Component::ScaleComponent>().oper(flecs::Or)
@@ -113,7 +113,7 @@ void aZero::Scene::Scene::Init()
 		.with<Component::TriggerbodyComponent>().oper(flecs::Or)
 		.with<Component::StaticComponent>()
 		.without(flecs::ChildOf)
-		.build();
+		.build();*/
 
 	m_Static_Mesh_Query = m_World.query_builder<const Component::MeshComponent, const Component::PositionComponent, const Component::RotationComponent, const Component::ScaleComponent>().with<Component::StaticComponent>().build();
 	m_Dynamic_Mesh_Query = m_World.query_builder<const Component::MeshComponent, const Component::PositionComponent, const Component::RotationComponent, const Component::ScaleComponent>().without<Component::StaticComponent>().cached().build();
@@ -1110,6 +1110,216 @@ std::unordered_map<uint32_t, std::string> aZero::Scene::Scene::LoadGltf_Textures
 	}
 
 	return imageIndexToName;
+}
+
+bool aZero::Scene::Scene::FromGltf(Asset::LoadedGltf& gltf, System::MeshSystem& meshSystem, System::MaterialSystem& matSystem, System::TextureSystem& tSystem, bool consumeGltf)
+{
+	auto nullTexture = tSystem.GetTexture(System::TextureSystem::s_Null_TextureStr);
+	auto pbrMaterialTemplate = matSystem.GetMaterial(System::MaterialSystem::s_PBRTypeStr);
+	auto defaultPbrInstance = matSystem.GetMaterialInstance(System::MaterialSystem::s_DefaultPBRInstanceStr);
+	if (!pbrMaterialTemplate || !nullTexture || !defaultPbrInstance)
+	{
+		return false;
+	}
+
+	// Mesh creation
+	std::unordered_map<uint32_t, std::string> meshIndexToName;
+	for (uint32_t i = 0; i < gltf.MeshData.size(); i++)
+	{
+		Asset::MeshletMeshData& meshData = gltf.MeshData[i];
+		std::optional<std::reference_wrapper<Asset::Mesh>> res;
+		std::string name = meshData.Name;
+		if (consumeGltf)
+		{
+			res = meshSystem.CreateMesh(name, std::move(meshData));
+		}
+		else
+		{
+			res = meshSystem.CreateMesh(name, meshData);
+		}
+
+		if (res)
+		{
+			meshIndexToName[i] = name;
+		}
+		else // todo Impl loading s_DefaultMeshStr
+		{
+			meshIndexToName[i] = System::MeshSystem::s_DefaultMeshStr;
+		}
+	}
+	//
+
+	// Texture creation
+	std::unordered_map<uint32_t, std::string> imageIndexToName;
+	for (uint32_t i = 0; i < gltf.ImageData.size(); i++)
+	{
+		auto& imageData = gltf.ImageData[i];
+		if (!imageData)
+		{
+			imageIndexToName[i] = System::TextureSystem::s_Null_TextureStr;
+			continue;
+		}
+
+		std::optional<std::reference_wrapper<Asset::Texture>> res;
+		std::string name = imageData.value().Name;
+		if (consumeGltf)
+		{
+			res = tSystem.CreateTexture(name, std::move(imageData.value()));
+		}
+		else
+		{
+			res = tSystem.CreateTexture(name, imageData.value());
+		}
+
+		if (res)
+		{
+			imageIndexToName[i] = name;
+		}
+		else
+		{
+			imageIndexToName[i] = System::TextureSystem::s_Null_TextureStr;
+		}
+	}
+	//
+
+	// Material creation
+	auto assignTexture = [&imageIndexToName, &nullTexture, &tSystem](uint32_t& textureIndex) {
+		if (textureIndex != std::numeric_limits<uint32_t>::max())
+		{
+			if (auto iter = imageIndexToName.find(textureIndex); iter != imageIndexToName.end())
+			{
+				auto tex = tSystem.GetTexture(iter->second);
+				if (tex)
+				{
+					textureIndex = tex->get().GetDescriptorIndex();
+				}
+				else
+				{
+					textureIndex = nullTexture->get().GetDescriptorIndex();
+				}
+			}
+		}
+	};
+
+	std::unordered_map<uint32_t, std::string> materialIndexToName;
+	for (uint32_t i = 0; i < gltf.Materials.size(); i++)
+	{
+		auto& [name, materialData] = gltf.Materials[i];
+		assignTexture(materialData.AlbedoTexture);
+		assignTexture(materialData.NormalMap);
+		assignTexture(materialData.RoughnessMetallic);
+		assignTexture(materialData.GlowMap);
+		assignTexture(materialData.TransparencyMap);
+
+		auto materialInstance = matSystem.CreateMaterialInstance(name, pbrMaterialTemplate.value().get());
+		if (!materialInstance)
+		{
+			materialIndexToName[i] = System::MaterialSystem::s_DefaultPBRInstanceStr;
+			continue;
+		}
+
+		materialIndexToName[i] = name;
+		materialInstance->get().RawCopy((void*)&materialData, sizeof(materialData));
+	}
+	//
+
+	fastgltf::iterateSceneNodes(gltf.LoadedAsset, 0, fastgltf::math::fmat4x4(),
+		[&](const fastgltf::Node& node, fastgltf::math::fmat4x4 matrix) {
+
+			flecs::entity entity = m_World.entity(node.name.c_str());
+			std::visit(fastgltf::visitor{
+				[](const auto& arg) {},
+				[&](const fastgltf::TRS& tf) {
+					Component::PositionComponent position(tf.translation.x(), tf.translation.y(), tf.translation.z());
+					glm::quat rotQuat(tf.rotation.w(), tf.rotation.x(), tf.rotation.y(), tf.rotation.z()); // glm::quat takes w as the first param while fastgltf takes it as the last... makes no sense when glm stores w last... bruv
+					glm::vec3 rotation = glm::degrees(glm::eulerAngles(rotQuat));
+					Component::ScaleComponent scale(tf.scale.x(), tf.scale.y(), tf.scale.z());
+					entity.set<Component::PositionComponent>(position);
+					entity.set<Component::RotationComponent>(rotation);
+					entity.set<Component::ScaleComponent>(scale);
+					entity.add<Component::StaticComponent>();
+				},
+				[&](const fastgltf::math::fmat4x4& tf) {
+
+				}
+				}, node.transform);
+
+			if (node.meshIndex.has_value()) {
+				auto mesh = meshSystem.GetMesh(meshIndexToName[node.meshIndex.value()]);
+				if (mesh) {
+					Component::MeshComponent meshComponent(mesh.value().get(), defaultPbrInstance->get());
+					for (int32_t i = 0; i < meshComponent.m_NumSubmeshes; i++)
+					{
+						if (auto iter = materialIndexToName.find(gltf.LoadedAsset.meshes[node.meshIndex.value()].primitives[i].materialIndex.value()); iter != materialIndexToName.end())
+						{
+							auto submeshMaterial = matSystem.GetMaterialInstance(iter->second);
+							if (!submeshMaterial)
+							{
+								continue;
+							}
+							meshComponent.SetMaterial(i, submeshMaterial->get());
+						}
+					}
+					entity.set<Component::MeshComponent>(meshComponent);
+				}
+			}
+			//if (node.cameraIndex.has_value()) {
+			//	const fastgltf::Camera& camera = asset->cameras[node.cameraIndex.value()];
+			//	std::visit(fastgltf::visitor{
+			//		[](const auto& arg) {},
+			//		[&](const fastgltf::Camera::Perspective& perspective) {
+			//			Component::CameraComponent cameraComponent(Component::CameraComponent::EProjectionType::Perspective, static_cast<float>(perspective.yfov),
+			//				static_cast<float>(perspective.znear), perspective.zfar.has_value() ? static_cast<float>(perspective.zfar.value()) : 1000.f /* default to 1000.f */,
+			//				//perspective.aspectRatio.has_value() ? static_cast<float>(perspective.aspectRatio.value()) : 16.f / 9.f /* default to 16:9 */,
+			//				true, Helper::Rectangle(0,0,800,600)); // todo Handle loading with aspect ratio instead of hardcoding width and height
+			//			entity.set<Component::CameraComponent>(cameraComponent);
+			//		},
+			//		[&](const fastgltf::Camera::Orthographic orthographic) {
+			//			Component::CameraComponent cameraComponent(Component::Camera::EProjectionType::Ortographic, 0.f,
+			//				static_cast<float>(orthographic.znear), static_cast<float>(orthographic.zfar),
+			//				true, Helper::Rectangle(0,0,800,600)); // todo Handle loading using orthographic.xmag and orthographic.ymag
+			//			entity.set<Component::CameraComponent>(cameraComponent);
+			//		}
+			//		}, camera.camera);
+			//}
+			//if (node.lightIndex.has_value()) {
+			//	const fastgltf::Light& light = asset->lights[node.lightIndex.value()];
+			//	switch (light.type)
+			//	{
+			//	case fastgltf::LightType::Point:
+			//	{
+			//		Component::PointLightComponent p;
+			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
+			//		p.intensity = light.intensity;
+			//		entity.set<Component::PointLight>(p);
+			//		break;
+			//	}
+			//	case fastgltf::LightType::Spot:
+			//	{
+			//		Component::SpotLightComponent p;
+			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
+			//		p.intensity = light.intensity;
+
+			//		// todo Figure out which ones that should be used and how
+			//		/*p.coneAngle = light.innerConeAngle.has_value() ? light.innerConeAngle.value() : 0.f;
+			//		p.coneAngle = light.outerConeAngle.has_value() ? light.outerConeAngle.value() : 0.f;*/
+
+			//		entity.set<Component::SpotLightComponent>(p);
+			//		break;
+			//	}
+			//	case fastgltf::LightType::Directional:
+			//	{
+			//		Component::DirectionalLightComponent p;
+			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
+			//		p.intensity = light.intensity;
+			//		entity.set<Component::DirectionalLightComponent>(p);
+			//		break;
+			//	}
+			//	default:
+			//		break;
+			//	}
+			//}
+		});
 }
 
 // todo If fail -> empty

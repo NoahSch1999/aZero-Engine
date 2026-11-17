@@ -12,7 +12,11 @@
 #include "render_api/Descriptor.hpp"
 
 namespace aZero::System { class MaterialSystem; }
-
+namespace aZero
+{
+	template<typename T>
+	class RefCounted;
+}
 namespace aZero::Asset
 {
 	enum class ParameterType : std::uint32_t {
@@ -149,11 +153,12 @@ namespace aZero::Asset
 	};
 
 	using MaterialRuntimeTypeID = uint32_t;
-	struct MaterialInstance;
+	class MaterialInstance;
 
 	class MaterialType : public Asset::AssetBase
 	{
 		friend class aZero::System::MaterialSystem;
+		friend class RefCounted<MaterialType>;
 	public:
 		MaterialType(const MaterialDefinition& definition, MaterialRuntimeTypeID runtimeTypeID)
 			:m_Definition(definition), m_ParameterSizeInfo(definition.GetParameterSizeInfo()), m_RuntimeTypeID(runtimeTypeID)
@@ -164,8 +169,21 @@ namespace aZero::Asset
 		const MaterialDefinition::SizeInfo& GetParameterSizeInfo() const { return m_ParameterSizeInfo; }
 		MaterialRuntimeTypeID GetRuntimeTypeID() const { return m_RuntimeTypeID; }
 	private:
+		void AddRef()
+		{
+			m_Refcount++;
+		}
+
+		void RemoveRef()
+		{
+			if (m_Refcount > 0)
+			{
+				m_Refcount--;
+			}
+		}
 		MaterialDefinition m_Definition;
 		MaterialDefinition::SizeInfo m_ParameterSizeInfo;
 		MaterialRuntimeTypeID m_RuntimeTypeID;
+		uint32_t m_Refcount = 0;
 	};
 }

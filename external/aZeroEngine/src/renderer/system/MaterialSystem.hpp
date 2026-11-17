@@ -22,7 +22,7 @@ namespace aZero::System
 		struct MaterialAllocationInfo
 		{
 			Asset::MaterialType MaterialBase;
-			Compiler::ShaderProgram ShaderProgram;
+			Pipeline::RenderPass Pipeline;
 		};
 
 		struct MaterialInstanceAllocationInfo
@@ -31,6 +31,7 @@ namespace aZero::System
 			Asset::MaterialInstance Instance;
 		};
 	public:
+		static inline const char* s_PBRTypeStr = "PBR";
 		static inline const char* s_DefaultPBRInstanceStr = "Default_PBR";
 		MaterialSystem() = default;
 		MaterialSystem(RenderAPI::Core& core, Compiler::Compiler& diCompiler, Renderer::ResourceRecycler& recycler, uint64_t bufferSize, uint32_t maxInitialMaterials, System::TextureSystem& textureSystem)
@@ -124,22 +125,14 @@ namespace aZero::System
 				m_MaterialTypeIndexList.Recycle(newMaterialTypeIndex);
 				return std::nullopt;
 			}
-
-			if (m_Passes.size() <= newMaterialTypeIndex)
-			{
-				m_Passes.emplace_back(std::move(pass));
-			}
-			else
-			{
-				m_Passes[newMaterialTypeIndex] = std::move(pass);
-			}
+			info.Pipeline = std::move(pass);
 
 			auto [it, inserted] = m_Materials.emplace(name, std::move(info));
 			return it->second.MaterialBase;
 		}
 
 		// todo Support initiation values
-		std::optional<std::reference_wrapper<Asset::MaterialInstance>> CreateMaterialInstance(const std::string& name, const Asset::MaterialType& material)
+		std::optional<std::reference_wrapper<Asset::MaterialInstance>> CreateMaterialInstance(const std::string& name, Asset::MaterialType& material)
 		{
 			if (m_MaterialInstances.contains(name))
 			{
@@ -221,6 +214,17 @@ namespace aZero::System
 			return std::nullopt;
 		}
 
+		// Returns a vector with the count per-material-type.
+		// The vector order matches the m_Materials iteration order as long as m_Materials iterator hasnt been changed.
+		std::vector<uint32_t> GetMaterialTypeCounts() const
+		{
+			std::vector<uint32_t> counts;
+			for (auto& [name, material] : m_Materials) // Horrible, but good for now...
+			{
+				counts.push_back(material.MaterialBase.m_Refcount);
+			}
+			return counts;
+		}
 		
 	private:
 		const RenderAPI::Buffer& GetMaterialInstanceBuffer() const { return m_MaterialInstanceBuffer; }
@@ -266,8 +270,6 @@ namespace aZero::System
 				return false;
 			}
 
-			allocationInfo.ShaderProgram = std::move(program);
-
 			return true;
 		}
 
@@ -289,7 +291,7 @@ namespace aZero::System
 		aZero::FreelistAllocator m_Allocator;
 		aZero::DS::IndexFreelist<Asset::MaterialRuntimeTypeID> m_MaterialTypeIndexList;
 		std::unordered_map<std::string, MaterialAllocationInfo> m_Materials;
-		std::vector<Pipeline::RenderPass> m_Passes;
+		//std::vector<Pipeline::RenderPass> m_Passes;
 		std::unordered_map<std::string, MaterialInstanceAllocationInfo> m_MaterialInstances;
 		uint32_t m_FrameIndex;
 		Compiler::Compiler* m_diCompiler = nullptr;

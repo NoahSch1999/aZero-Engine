@@ -185,6 +185,9 @@ namespace aZero::RenderAPI
         void Copy(const RenderAPI::Image& srcImage, VkImage dstImage, VkImageLayout dstImageLayout) const;
         void Copy(const RenderAPI::Image& srcImage, const RenderAPI::Image& dstImage) const;
 
+        void ClearColorTarget(const RenderAPI::Image& image, const VkClearColorValue& color) const;
+        void ClearDepthStencilTarget(const RenderAPI::Image& image, const VkClearDepthStencilValue& values) const;
+
         VkCommandBuffer Get() const { return m_CommandBuffer; }
 
     private:

@@ -6,8 +6,10 @@
 
 #include "asset/AssetData.hpp"
 #include "ImageLoading.hpp"
+#include "asset/material/PBR_Material.hpp"
+#include "misc/Threadpool.hpp"
 
-namespace aZero::File
+namespace aZero::Asset
 {
 	inline aZero::Asset::LegacyMeshData ExtractGltfLegacyMesh(const fastgltf::Mesh& mesh, fastgltf::Asset* asset)
 	{
@@ -196,18 +198,16 @@ namespace aZero::File
 		return meshData;
 	}
 
-	inline aZero::Asset::ImageData ExtractGltfImage(const fastgltf::Image& image, fastgltf::Asset* asset, const std::filesystem::path& path)
+	inline std::optional<aZero::Asset::ImageData> ExtractGltfImage(const fastgltf::Image& image, fastgltf::Asset* asset, const std::filesystem::path& path)
 	{
-		aZero::Asset::ImageData imageData;
+		std::optional<aZero::Asset::ImageData> imageData;
 
 		std::visit(fastgltf::visitor{
-			[](const auto& arg) {},
-			[&imageData, &path](const fastgltf::sources::URI& filePath) {
-				auto res = aZero::Asset::LoadImageData(path.parent_path() / std::filesystem::path(filePath.uri.path()));
-				if (res.has_value())
-				{
-					imageData = std::move(res.value());
-				}
+				[](const auto& arg) {},
+				[&imageData, &path](const fastgltf::sources::URI& filePath) {
+				// todo Figure out how to handle formatting
+				std::filesystem::path relative(filePath.uri.path());
+				imageData = aZero::Asset::LoadImageData(path.parent_path() / relative, true);
 			},
 			[&imageData, &image](const fastgltf::sources::Array& vector) {
 				imageData = aZero::Asset::LoadImageDataFromMemory(image.name.c_str(), vector.bytes.data(), vector.bytes.size(), 0);
@@ -226,4 +226,201 @@ namespace aZero::File
 
 		return imageData;
 	}
+
+	// Returns a material with the image index instead of descriptor index
+	inline Asset::PBRMaterialData ExtractPBRMaterial(const fastgltf::Material& material, fastgltf::Asset* asset)
+	{
+		Asset::PBRMaterialData pbrData;
+
+		if (material.pbrData.baseColorTexture.has_value()) {
+			auto imageIndex = asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.has_value() ?
+				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.value() :
+				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.value() :
+				std::numeric_limits<uint32_t>::max();
+
+			pbrData.AlbedoTexture = imageIndex;
+		}
+
+		if (material.normalTexture.has_value()) {
+			auto imageIndex = asset->textures[material.normalTexture.value().textureIndex].imageIndex.has_value() ?
+				asset->textures[material.normalTexture.value().textureIndex].imageIndex.value() :
+				asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.value() :
+				std::numeric_limits<uint32_t>::max();
+
+			pbrData.NormalMap = imageIndex;
+		}
+
+		if (material.pbrData.metallicRoughnessTexture.has_value()) {
+			// todo Impl
+		}
+
+		pbrData.RoughnessFactor = material.pbrData.roughnessFactor;
+		pbrData.MetallicFactor = material.pbrData.metallicFactor;
+
+		return pbrData;
+	}
+
+	class LoadedGltf
+	{
+	public:
+		fastgltf::Asset LoadedAsset;
+
+		std::vector<std::optional<Asset::ImageData>> ImageData;
+		std::vector<Asset::MeshletMeshData> MeshData;
+		std::vector<std::pair<std::string, Asset::PBRMaterialData>> Materials;
+
+		LoadedGltf() = default;
+		LoadedGltf(const std::filesystem::path& path)
+		{
+			this->Load(path);
+		}
+
+		bool Load(const std::filesystem::path& path)
+		{
+			static constexpr auto supportedExtensions =
+				fastgltf::Extensions::KHR_mesh_quantization |
+				fastgltf::Extensions::KHR_texture_transform |
+				fastgltf::Extensions::KHR_materials_variants |
+				fastgltf::Extensions::KHR_lights_punctual |
+				fastgltf::Extensions::KHR_texture_basisu
+				;
+
+			fastgltf::Parser parser(supportedExtensions);
+
+			constexpr auto gltfOptions =
+				fastgltf::Options::DontRequireValidAssetMember |
+				fastgltf::Options::AllowDouble |
+				fastgltf::Options::LoadExternalBuffers |
+				//fastgltf::Options::LoadExternalImages |
+				fastgltf::Options::GenerateMeshIndices |
+				fastgltf::Options::DecomposeNodeMatrices
+				;
+
+			auto gltfFile = fastgltf::MappedGltfFile::FromPath(path);
+			if (!bool(gltfFile)) {
+				std::cerr << "Failed to open glTF file: " << fastgltf::getErrorMessage(gltfFile.error()) << '\n';
+				return false;
+			}
+
+			auto loadedAsset = parser.loadGltf(gltfFile.get(), path.parent_path(), gltfOptions);
+			fastgltf::Asset* asset = loadedAsset.get_if();
+			if (!asset) {
+				std::cerr << "Failed to load glTF file: " << fastgltf::getErrorMessage(loadedAsset.error()) << '\n';
+				return false;
+			}
+
+			LoadedAsset = std::move(*asset);
+
+			aZero::ThreadPool tp(std::thread::hardware_concurrency());
+			std::vector<std::future<void>> tpHandles;
+
+			std::chrono::high_resolution_clock clock;
+
+			auto start = clock.now();
+			std::cout << "------------------------------------\nTextures loading... ";
+			this->Load_Images(path, &LoadedAsset, tp, tpHandles);
+			auto end = clock.now();
+			std::chrono::duration<double> diff = end - start;
+			std::cout << "Completed after: " << diff << "\n";
+
+			start = clock.now();
+			std::cout << "------------------------------------\nMeshes loading... ";
+			this->Load_And_Meshletize_Meshes(path, &LoadedAsset, tp, tpHandles);
+			end = clock.now();
+			diff = end - start;
+			std::cout << "Completed after: " << diff << "\n";
+
+			start = clock.now();
+			std::cout << "------------------------------------\nMaterials loading... ";
+			this->Load_Materials(&LoadedAsset);
+			end = clock.now();
+			diff = end - start;
+			std::cout << "Completed after: " << diff << "\n";
+
+			for (auto& handle : tpHandles)
+			{
+				handle.wait();
+			}
+
+			return true;
+		}
+
+	private:
+
+		void Load_Images(const std::filesystem::path& path, fastgltf::Asset* asset, aZero::ThreadPool& tp, std::vector<std::future<void>>& handles)
+		{
+			ImageData.resize(asset->images.size());
+			for (int i = 0; i < asset->images.size(); i++)
+			{
+				handles.emplace_back(tp.AddJobA([this, asset, path, i] {
+					ImageData[i] = Asset::ExtractGltfImage(asset->images[i], asset, path);
+				}));
+			}
+		}
+
+		/*void Load_Images(const std::filesystem::path& path, fastgltf::Asset* asset, aZero::ThreadPool& tp)
+		{
+			std::vector<std::future<void>> handles(asset->images.size());
+			std::vector< std::optional<Asset::ImageData>> imageData;
+			imageData.resize(asset->images.size());
+			for (int i = 0; i < asset->images.size(); i++)
+			{
+				handles[i] = tp.AddJobA([&] {
+					imageData[i] = Asset::ExtractGltfImage(asset->images[i], asset, path);
+				});
+			}
+
+			for (uint32_t i = 0; i < handles.size(); i++)
+			{
+				handles[i].wait();
+				if (imageData[i] && imageData[i].value().HasValidData())
+				{
+					ImageIndexToName.emplace(i, imageData[i].value().Name);
+					ImageData.emplace_back(std::move(imageData[i].value()));
+				}
+			}
+		}*/
+
+		void Load_And_Meshletize_Meshes(const std::filesystem::path& path, fastgltf::Asset* asset, aZero::ThreadPool& tp, std::vector<std::future<void>>& handles)
+		{
+			MeshData.resize(asset->meshes.size());
+
+			for (int i = 0; i < asset->meshes.size(); i++)
+			{
+				handles.emplace_back(tp.AddJobA([this, asset, i] {
+					MeshData[i] = Asset::ExtractGltfMeshletMesh(asset->meshes[i], asset);
+				}));
+			}
+		}
+
+		/*void Load_And_Meshletize_Meshes(const std::filesystem::path& path, fastgltf::Asset* asset, aZero::ThreadPool& tp)
+		{
+			std::vector<std::future<void>> handles(asset->meshes.size());
+			MeshData.reserve(asset->meshes.size());
+
+			for (int i = 0; i < asset->meshes.size(); i++)
+			{
+				handles[i] = tp.AddJobA([&] {
+					MeshData[i] = Asset::ExtractGltfMeshletMesh(asset->meshes[i], asset);
+					});
+			}
+
+			for (uint32_t i = 0; i < handles.size(); i++)
+			{
+				handles[i].wait();
+				if (MeshData[i].HasValidData())
+				{
+					MeshIndexToName.emplace(i, MeshData[i].Name);
+				}
+			}
+		}*/
+
+		void Load_Materials(fastgltf::Asset* asset)
+		{
+			for (int i = 0; i < asset->materials.size(); i++)
+			{
+				Materials.push_back(std::make_pair<std::string, Asset::PBRMaterialData>(asset->materials[i].name.c_str(), ExtractPBRMaterial(asset->materials[i], asset)));
+			}
+		}
+	};
 }

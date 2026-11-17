@@ -1,5 +1,6 @@
 #pragma once
 #include "MaterialType.hpp"
+#include "misc/Refcounted.hpp"
 
 namespace aZero::Asset
 {
@@ -10,7 +11,7 @@ namespace aZero::Asset
 		friend class aZero::System::MaterialSystem;
 	public:
 		MaterialInstance() = default;
-		MaterialInstance(const MaterialType& diMaterial, const std::string& name, MaterialInstanceBDA instanceBDA)
+		MaterialInstance(MaterialType& diMaterial, const std::string& name, MaterialInstanceBDA instanceBDA)
 			:m_Name(name), m_diMaterial(&diMaterial), m_InstanceBDA(instanceBDA)
 		{
 			m_Data.resize(diMaterial.GetParameterSizeInfo().TotalSize);
@@ -90,8 +91,13 @@ namespace aZero::Asset
 		void SetNotDirty() { m_IsDirty = false; }
 		bool IsDirty() const { return m_IsDirty; }
 		MaterialInstanceBDA GetBDA() const { return m_InstanceBDA; }
+
+		aZero::RefCounted<Asset::MaterialType> GetReference()
+		{
+			return aZero::RefCounted<Asset::MaterialType>(*m_diMaterial);
+		}
 	private:
-		const MaterialType* m_diMaterial = nullptr;
+		MaterialType* m_diMaterial = nullptr;
 		std::vector<std::byte> m_Data;
 		MaterialInstanceBDA m_InstanceBDA = g_InvalidInstanceBDA;
 		std::string m_Name;

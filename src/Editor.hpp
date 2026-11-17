@@ -105,36 +105,12 @@ namespace aZero::Editor
 				ent.set(m);
 			}
 
-			{
-				auto cam = m_Scene->GetWorld().entity("camera2");
-				Component::CameraComponent camera{
-						.m_Type = Component::ECameraType::PERSPECTIVE,
-						.m_PriorityIndex = 0,
-						.m_Fov = M_PI - 1,
-						.m_Top = 0.5f,
-						.m_Left = 0.5f,
-						.m_Bottom = 1.f,
-						.m_Right = 1.f,
-						.m_Near = 0.001f,
-						.m_Far = 1000.f,
-						.m_OptColorTarget = m_ColorTarget,
-						.m_OptDepthStencilTarget = m_DepthStencilTarget,
-						.m_ClearColorTargetOnRender = false,
-						.m_ClearDepthStencilTargetOnRender = false
-				};
-				p.Position.z = 5;
-				cam.set(p);
-				cam.set(r);
-				cam.set(camera);
-				cam.add<Component::StaticComponent>();
-			}
-
-			m_Scene = std::make_unique<Scene::Scene>();
-			m_Scene->LoadGltf(std::string(PROJECT_DIRECTORY) + "scenes/sponza/sponza.gltf", m_Engine->GetMeshSystem(), m_Engine->GetMaterialSystem(), m_Engine->GetTextureSystem());
-
+			CurrentLoadingHandle = std::async(std::launch::async, [&] {
+				CurrentGltf.Load(std::string(PROJECT_DIRECTORY) + "scenes/sponza/sponza.gltf");
+			});
 
 			{
-				p.Position = { 0,0,1 };
+				p.Position = { 0,0,5 };
 				r.Rotation = { 0,0,0 };
 				auto cam = m_Scene->GetWorld().entity("camera");
 				Component::CameraComponent camera{
@@ -158,7 +134,6 @@ namespace aZero::Editor
 				cam.add<Component::StaticComponent>();
 			}
 
-
 			{
 				auto ent = m_Scene->GetWorld().entity("mesh2");
 				p.Position = { 0,0.3,0 };
@@ -168,6 +143,7 @@ namespace aZero::Editor
 				ent.set(r);
 				ent.set(s);
 				Component::MeshComponent m(m_Engine->GetMeshSystem().GetMesh("MyMesh").value().get(), m_Engine->GetMaterialSystem().GetMaterialInstance("MyMaterialInstance").value().get());
+				//Component::MeshComponent m(m_Engine->GetMeshSystem().GetMesh("MyMesh").value().get(), m_Engine->GetMaterialSystem().GetMaterialInstance(System::MaterialSystem::s_DefaultPBRInstanceStr).value().get());
 				ent.set(m);
 				ent.add<Component::StaticComponent>();
 			}
@@ -202,35 +178,72 @@ namespace aZero::Editor
 			m_MainWindow->m_SwapChain.NextFrame(m_Engine->GetRenderer().GetFrameIndex());
 
 			// do frame stuff
+			if (CurrentLoadingHandle.valid() && CurrentLoadingHandle.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+			{
+				std::cout << "Loading complete... ready to initialize scene..." << "\n";
+				m_Scene = std::make_unique<Scene::Scene>();
+				m_Scene->FromGltf(CurrentGltf, m_Engine->GetMeshSystem(), m_Engine->GetMaterialSystem(), m_Engine->GetTextureSystem());
 
-			/*auto ent = m_Scene->GetWorld().entity("mesh3");
-			ent.get_mut<Component::RotationComponent>().Rotation.y += 0.1f;
-			ent.get_mut<Component::PositionComponent>().Position.z = sin(idk) * 4;*/
+				{
+					Component::PositionComponent p;
+					Component::RotationComponent r;
+					p.Position = { 0,0,1 };
+					r.Rotation = { 0,0,0 };
+					auto cam = m_Scene->GetWorld().entity("camera");
+					Component::CameraComponent camera{
+							.m_Type = Component::ECameraType::PERSPECTIVE,
+							.m_PriorityIndex = 1,
+							.m_Fov = M_PI / 3.f,
+							.m_Top = 0.0f,
+							.m_Left = 0.0f,
+							.m_Bottom = 1.f,
+							.m_Right = 1.f,
+							.m_Near = 0.001f,
+							.m_Far = 1000.f,
+							.m_OptColorTarget = m_ColorTarget,
+							.m_OptDepthStencilTarget = m_DepthStencilTarget,
+							.m_ClearColorTargetOnRender = true,
+							.m_ClearDepthStencilTargetOnRender = true
+					};
+					cam.set(p);
+					cam.set(r);
+					cam.set(camera);
+					cam.add<Component::StaticComponent>();
+				}
+
+				std::cout << "Scene initialization complete!" << "\n";
+				CurrentLoadingHandle = {};
+			}
+
 			auto cam = m_Scene->GetWorld().entity("camera");
-			if (GetAsyncKeyState('W'))
+			if (cam.is_alive())
 			{
-				cam.get_mut<Component::PositionComponent>().Position.z -= idk;
+				if (GetAsyncKeyState('W'))
+				{
+					cam.get_mut<Component::PositionComponent>().Position.z -= idk;
+				}
+				if (GetAsyncKeyState('S'))
+				{
+					cam.get_mut<Component::PositionComponent>().Position.z += idk;
+				}
+				if (GetAsyncKeyState('A'))
+				{
+					cam.get_mut<Component::PositionComponent>().Position.x -= idk;
+				}
+				if (GetAsyncKeyState('D'))
+				{
+					cam.get_mut<Component::PositionComponent>().Position.x += idk;
+				}
+				if (GetAsyncKeyState(VK_SPACE))
+				{
+					cam.get_mut<Component::PositionComponent>().Position.y += idk;
+				}
+				if (GetAsyncKeyState(VK_LSHIFT))
+				{
+					cam.get_mut<Component::PositionComponent>().Position.y -= idk;
+				}
 			}
-			if (GetAsyncKeyState('S'))
-			{
-				cam.get_mut<Component::PositionComponent>().Position.z += idk;
-			}
-			if (GetAsyncKeyState('A'))
-			{
-				cam.get_mut<Component::PositionComponent>().Position.x -= idk;
-			}
-			if (GetAsyncKeyState('D'))
-			{
-				cam.get_mut<Component::PositionComponent>().Position.x += idk;
-			}
-			if (GetAsyncKeyState(VK_SPACE))
-			{
-				cam.get_mut<Component::PositionComponent>().Position.y += idk;
-			}
-			if (GetAsyncKeyState(VK_LSHIFT))
-			{
-				cam.get_mut<Component::PositionComponent>().Position.y -= idk;
-			}
+			
 			m_Scene->MarkStaticMeshesDirty();
 
 			m_Engine->GetRenderer().FinalizeFrame();
@@ -243,6 +256,8 @@ namespace aZero::Editor
 		}
 
 	private:
+		aZero::Asset::LoadedGltf CurrentGltf;
+		std::future<void> CurrentLoadingHandle;
 		flecs::entity cameraEnt;
 		flecs::entity meshEnt;
 		std::unique_ptr<aZero::Scene::Scene> m_Scene;

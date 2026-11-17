@@ -29,6 +29,7 @@ namespace aZero::Component
                     newSubmesh.VertexBufferPtr = mesh.GetVertexGpuPtr();
                     newSubmesh.MeshletBoundsBufferPtr = mesh.GetMeshletBoundsGpuPtr() + submeshes[i].MeshletOffset * sizeof(BoundingVolume::BoundingSphere);
                     newSubmesh.Bounds = submeshes[i].Bounds;
+                    newSubmesh.MaterialRef = material.GetReference();
                     m_Submeshes[i] = newSubmesh;
                     this->SetMaterial(i, material);
                 }
@@ -40,6 +41,7 @@ namespace aZero::Component
                 m_Submeshes[submeshIndex].MaterialPtr = material.GetBDA();
                 m_Submeshes[submeshIndex].MaterialTypeIndex = material.GetMaterial()->get().GetRuntimeTypeID();
                 m_Submeshes[submeshIndex].Material = &material;
+                m_Submeshes[submeshIndex].MaterialRef = material.GetReference();
             }
         }
 
@@ -49,6 +51,7 @@ namespace aZero::Component
             VkDeviceAddress MeshletBufferPtr, VertexBufferPtr, MeshletBoundsBufferPtr, MaterialPtr;
             uint32_t MeshletCount, MaterialTypeIndex;
             const Asset::MaterialInstance* Material;
+            aZero::RefCounted<Asset::MaterialType> MaterialRef;
         };
 
         const Asset::Mesh* m_Mesh = nullptr;

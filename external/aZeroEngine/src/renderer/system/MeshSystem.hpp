@@ -17,6 +17,7 @@ namespace aZero::System
 			Asset::Mesh Mesh;
 		};
 	public:
+		static inline const char* s_DefaultMeshStr = "DefaultMesh";
 		MeshSystem() = default;
 		MeshSystem(RenderAPI::Core& core, Renderer::ResourceRecycler& recycler)
 			:m_diCore(&core), m_diRecycler(&recycler)

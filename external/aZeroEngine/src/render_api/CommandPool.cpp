@@ -150,6 +150,31 @@ void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Image& srcImage, con
     this->Copy(srcImage, dstImage.Get(), dstImage.GetCurrentLayout());
 }
 
+
+void aZero::RenderAPI::CommandBuffer::ClearColorTarget(const RenderAPI::Image& image, const VkClearColorValue& color) const
+{
+    VkImageSubresourceRange range{
+        .aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = image.GetDesc().MipCount,
+        .baseArrayLayer = 0,
+        .layerCount = image.GetDesc().ArrayLayers
+    };
+    vkCmdClearColorImage(m_CommandBuffer, image.Get(), image.GetCurrentLayout(), &color, 1, &range);
+}
+
+void aZero::RenderAPI::CommandBuffer::ClearDepthStencilTarget(const RenderAPI::Image& image, const VkClearDepthStencilValue& values) const
+{
+    VkImageSubresourceRange range{
+        .aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_DEPTH_BIT,
+        .baseMipLevel = 0,
+        .levelCount = image.GetDesc().MipCount,
+        .baseArrayLayer = 0,
+        .layerCount = image.GetDesc().ArrayLayers
+    };
+    vkCmdClearDepthStencilImage(m_CommandBuffer, image.Get(), image.GetCurrentLayout(), &values, 1, &range);
+}
+
 bool aZero::RenderAPI::CommandBuffer::ExecuteIndirectDGC(const ExecuteIndirectDGCDesc& desc)
 {
     if (

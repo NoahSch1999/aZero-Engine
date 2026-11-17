@@ -16,6 +16,7 @@
 
 namespace aZero
 {
+	namespace Asset { class LoadedGltf; }
 	namespace Physics { class PhysicsEngine; }
 	namespace Rendering { class WireframeRenderer; }
 	namespace RenderAPI { class CommandList; }
@@ -59,7 +60,7 @@ namespace aZero
 
 			flecs::world& GetWorld() { return m_World; }
 			SceneID GetSceneID() const { return m_SceneID; }
-			flecs::query<> GetRootEntityQuery() const { return m_RootEntityQuery; }
+			//flecs::query<> GetRootEntityQuery() const { return m_RootEntityQuery; }
 			bool LoadGltf(const std::filesystem::path& path, System::MeshSystem& meshSystem, System::MaterialSystem& matSystem, System::TextureSystem& tSystem);
 
 			flecs::entity GetStaticMeshPrefab() const { return m_StaticMeshPrefab; }
@@ -81,6 +82,10 @@ namespace aZero
 			void MarkStaticLightsDirty() { m_ShouldRebuildStaticLights = true; }
 
 			const std::unordered_map<uint32_t, flecs::entity_t>& GetBodyID_To_EntityID_Map() const { return m_BodyID_To_EntityID; } // This name...
+
+
+			// If "consumeGltf" is true the gltf file will be invalid after return
+			bool FromGltf(Asset::LoadedGltf& gltf, System::MeshSystem& meshSystem, System::MaterialSystem& matSystem, System::TextureSystem& tSystem, bool consumeGltf = true);
 
 		private:
 			void Init();
@@ -110,7 +115,7 @@ namespace aZero
 			flecs::observer m_Triggerbody_OnRemove_Observer;
 			flecs::observer m_ParentTransform_Observer;
 
-			flecs::query<> m_RootEntityQuery;
+			//flecs::query<> m_RootEntityQuery;
 
 			flecs::query<const Component::MeshComponent, const Component::PositionComponent, const Component::RotationComponent, const Component::ScaleComponent> m_Static_Mesh_Query;
 			flecs::query<const Component::MeshComponent, const Component::PositionComponent, const Component::RotationComponent, const Component::ScaleComponent> m_Dynamic_Mesh_Query;

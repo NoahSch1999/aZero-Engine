@@ -152,10 +152,10 @@ namespace aZero::Renderer
 				.MaterialShaderName = "PBRMaterial"
 			};
 
-			auto pbrMaterialRes = m_MaterialSystem->CreateMaterial("PBR", def);
+			auto pbrMaterialRes = m_MaterialSystem->CreateMaterial(System::MaterialSystem::s_PBRTypeStr, def);
 			if (pbrMaterialRes)
 			{
-				auto materialInstance = m_MaterialSystem->CreateMaterialInstance("Default_PBR", pbrMaterialRes.value().get());
+				auto materialInstance = m_MaterialSystem->CreateMaterialInstance(System::MaterialSystem::s_DefaultPBRInstanceStr, pbrMaterialRes.value().get());
 				if (materialInstance)
 				{
 					auto nullTexture = m_TextureSystem->GetTexture(System::TextureSystem::s_Null_TextureStr);
@@ -376,18 +376,14 @@ namespace aZero::Renderer
 
 		void RenderScene(Scene::Scene& scene)
 		{
-			auto materialCounts = m_MaterialSystem->CreateVectorForMaterialTypeCount();
-			if (materialCounts.empty())
-			{
-				return;
-			}
+
+			const std::vector<uint32_t> perMaterialCounts = m_MaterialSystem->GetMaterialTypeCounts();
+			std::vector<uint32_t> materialIndirectArgIndexOffsets(perMaterialCounts.size());
+			std::exclusive_scan(perMaterialCounts.cbegin(), perMaterialCounts.cend(), materialIndirectArgIndexOffsets.begin(), 0); // Prefix-sum to get the start offset of each materialtype IA
 
 			aZero::Renderer::FrameContext& frameContext = m_FrameContexts[m_FrameIndex];
 			RenderAPI::CommandBuffer commandBuffer = m_CommandManager.GetBuffer();
 			commandBuffer.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-
-			std::vector<uint32_t> materialOffsets(materialCounts.size());
-			std::exclusive_scan(materialCounts.cbegin(), materialCounts.cend(), materialOffsets.begin(), 0);
 
 			auto [frameData, renderData] = scene.CreateRenderData(*m_diCore, *m_ResourceRecycler.get(), frameContext.GetFrameAllocator().GetAllocator(), frameContext.GetFrameAllocator().GetBuffer(), commandBuffer);
 			for (uint32_t i = 0; i < frameData.Cameras.size(); i++) // todo For each camera
@@ -395,9 +391,87 @@ namespace aZero::Renderer
 				const Component::CameraComponent& camera = *frameData.Cameras[i];
 				if (camera.IsValidForRendering())
 				{
-					this->RenderWithCamera(commandBuffer, materialOffsets, materialCounts, renderData, frameData, i);
+					this->RenderWithCamera(commandBuffer, materialIndirectArgIndexOffsets, perMaterialCounts, renderData, frameData, i);
 				}
 			}
+
+			commandBuffer.StopRecording();
+
+			aZero::RenderAPI::CommandQueue::SubmitDesc submitDesc{
+			   .CommandBuffers = { &commandBuffer },
+			   .WaitOnSemaphores = {}, // No need to wait on the m_RenderSemaphore since barriers will guarantee sync if we use them correctly...
+			   .SignalSemaphores = {{.SemaphorePtr = &m_RenderSemaphore, .Stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}}
+			};
+			m_GraphicsQueue.SubmitCommandBuffers(submitDesc);
+		}
+
+		void ClearDepthStencilTarget(RenderTarget& renderTarget, const VkClearDepthStencilValue& value)
+		{
+			RenderAPI::CommandBuffer commandBuffer = m_CommandManager.GetBuffer();
+			commandBuffer.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+			{
+				aZero::RenderAPI::Image::TransitionDesc trDesc{
+						.DstStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+						.DstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+						.NewLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				};
+				trDesc.SubresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+				renderTarget.m_Image.Transition(trDesc);
+			}
+			commandBuffer.Barrier({}, { renderTarget.m_Image.GetTransition() }, {});
+
+			commandBuffer.ClearDepthStencilTarget(renderTarget.m_Image, value);
+
+			{
+				aZero::RenderAPI::Image::TransitionDesc trDesc{
+							.DstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+							.DstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+							.NewLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+				};
+				trDesc.SubresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+				renderTarget.m_Image.Transition(trDesc);
+			}
+			commandBuffer.Barrier({}, { renderTarget.m_Image.GetTransition() }, {});
+
+			commandBuffer.StopRecording();
+
+			aZero::RenderAPI::CommandQueue::SubmitDesc submitDesc{
+			   .CommandBuffers = { &commandBuffer },
+			   .WaitOnSemaphores = {}, // No need to wait on the m_RenderSemaphore since barriers will guarantee sync if we use them correctly...
+			   .SignalSemaphores = {{.SemaphorePtr = &m_RenderSemaphore, .Stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}}
+			};
+			m_GraphicsQueue.SubmitCommandBuffers(submitDesc);
+		}
+
+		void ClearColorTarget(RenderTarget& renderTarget, const VkClearColorValue& color)
+		{
+			RenderAPI::CommandBuffer commandBuffer = m_CommandManager.GetBuffer();
+			commandBuffer.StartRecording(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+			{
+				aZero::RenderAPI::Image::TransitionDesc trDesc{
+							.DstStageMask = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+							.DstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+							.NewLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				};
+				trDesc.SubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+				renderTarget.m_Image.Transition(trDesc);
+			}
+			commandBuffer.Barrier({}, { renderTarget.m_Image.GetTransition() }, {});
+
+			commandBuffer.ClearColorTarget(renderTarget.m_Image, color);
+
+			{
+				aZero::RenderAPI::Image::TransitionDesc trDesc{
+							.DstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+							.DstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+							.NewLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				};
+				trDesc.SubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+				renderTarget.m_Image.Transition(trDesc);
+			}
+			commandBuffer.Barrier({}, { renderTarget.m_Image.GetTransition() }, {});
 
 			commandBuffer.StopRecording();
 
@@ -514,14 +588,29 @@ namespace aZero::Renderer
 			commandBuffer.Barrier({}, {}, { m_MeshDraw_IA_Counter_Buffer.GetTransition(),  m_MeshDraw_IA_Buffer.GetTransition(),  m_MeshDraw_DrawMetadata_Buffer.GetTransition() });
 		}
 
-		void RecordMeshDrawPass(RenderAPI::CommandBuffer& commandBuffer, const std::vector<uint32_t>& materialOffsets, const std::vector<uint32_t>& materialCounts, const Scene::SceneRenderData& renderData, const Scene::SceneRenderDataFrameInfo& frameData, uint32_t cameraIndex)
+		void RecordMeshDrawPass(RenderAPI::CommandBuffer& commandBuffer, const std::vector<uint32_t>& materialOffsets, const std::vector<uint32_t>& perMaterialCounts, const Scene::SceneRenderData& renderData, const Scene::SceneRenderDataFrameInfo& frameData, uint32_t cameraIndex)
 		{
 			const Component::CameraComponent& camera = *frameData.Cameras[cameraIndex];
 			auto [vp, scizzor] = camera.GetViewportAndScizzorRect();
+
+			auto iter = m_MaterialSystem->m_Materials.begin();
+			bool hasRenderedOnce = false;
 			for (uint32_t i = 0; i < materialOffsets.size(); i++)
 			{
+				if (iter == m_MaterialSystem->m_Materials.end())
+				{
+					return;
+				}
+
+				if (perMaterialCounts[i] == 0)
+				{
+					iter++;
+					continue;
+				}
+
 				// todo Skip empty ones
-				Pipeline::RenderPass& pass = m_MaterialSystem->m_Passes[i];
+				Pipeline::RenderPass& pass = iter->second.Pipeline;
+				iter++;
 
 				Pipeline::RenderPass::RenderDesc rDesc{
 					.RenderRect = scizzor,
@@ -534,7 +623,7 @@ namespace aZero::Renderer
 						aZero::GPUStruct::MeshDrawPushConstants constants{
 							 .CameraBufferPtr = renderData.CameraBuffer.GetDeviceAddress().value() + cameraIndex * sizeof(GPUStruct::CameraData),
 							 .InstanceDataBufferPtr = renderData.InstanceBuffer.GetDeviceAddress().value(),
-							 .DrawMetadataBufferPtr = m_MeshDraw_DrawMetadata_Buffer.GetDeviceAddress().value() + (uint32_t)materialOffsets[i] * sizeof(GPUStruct::DrawMetaData),
+							 .DrawMetadataBufferPtr = m_MeshDraw_DrawMetadata_Buffer.GetDeviceAddress().value() + materialOffsets[i] * sizeof(GPUStruct::DrawMetaData),
 
 							 .PointLightsPtr = renderData.PointLightBuffer.GetDeviceAddress().value(),
 							 .NumPointLights = frameData.PointLightCount,
@@ -551,11 +640,11 @@ namespace aZero::Renderer
 
 						RenderAPI::CommandBuffer::ExecuteIndirectDesc exeDesc{
 							.IndirectArgumentBuffer = &m_MeshDraw_IA_Buffer,
-							.IndirectArgumentBufferOffset = (uint32_t)materialOffsets[i] * sizeof(aZero::GPUStruct::MeshTaskIndirectArgs), // Starts after count
+							.IndirectArgumentBufferOffset = materialOffsets[i] * sizeof(aZero::GPUStruct::MeshTaskIndirectArgs), // Starts after count
 							.IndirectArgumentStride = (uint32_t)(sizeof(aZero::GPUStruct::MeshTaskIndirectArgs)),
 							.CountBuffer = &m_MeshDraw_IA_Counter_Buffer,
 							.CountBufferOffset = i * sizeof(aZero::GPUStruct::IndirectArgumentCounter),
-							.MaxDraws = (uint32_t)(m_MeshDraw_IA_Buffer.GetDesc().Size / sizeof(aZero::GPUStruct::MeshTaskIndirectArgs)) // set to num entities in scene that can be rendered
+							.MaxDraws = perMaterialCounts[i] // set to num entities in scene that can be rendered
 						};
 						cb.ExecuteIndirectMeshTasksCount(exeDesc);
 					}
@@ -569,11 +658,13 @@ namespace aZero::Renderer
 					.View = &camera.m_OptDepthStencilTarget.value().get().m_View,
 					.LoadOp = camera.m_ClearDepthStencilTargetOnRender ? VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_CLEAR : VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_LOAD
 				};
-				if (i != 0)
+				if (hasRenderedOnce)
 				{
 					cTarget.LoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 					dsTarget.LoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 				}
+
+				hasRenderedOnce = true;
 				rDesc.ColorTargets.push_back(cTarget);
 				rDesc.DepthTarget = dsTarget;
 				pass.Render(commandBuffer, rDesc);
@@ -625,39 +716,42 @@ namespace aZero::Renderer
 			auto& textureSystem = *m_TextureSystem.get();
 			auto& materialSystem = *m_MaterialSystem.get();
 
-			Asset::ImageData imageData = aZero::File::ExtractGltfImage(asset->images[0], asset, path);
-			auto texture = textureSystem.CreateTexture("MyTexture", imageData);
-			if (texture)
+			auto imageData = aZero::Asset::ExtractGltfImage(asset->images[0], asset, path);
+			if (imageData)
 			{
-				Asset::MaterialDefinition def{
-				.Parameters = {
-					{"float1", Asset::ParameterType::float1},
-					{"int3", Asset::ParameterType::int3},
-					{"texture", Asset::ParameterType::tex2D}
-				},
-				.Properties = 0,
-				.MaterialShaderPath = std::string(ENGINE_SHADER_DIRECTORY) + "/testMaterial.slang",
-				.MaterialShaderName = "TestMaterial2"
-				};
-
-				auto material = materialSystem.CreateMaterial("MyMaterialType", def);
-				if (material)
+				auto texture = textureSystem.CreateTexture("MyTexture", imageData.value());
+				if (texture)
 				{
-					auto materialInstance = materialSystem.CreateMaterialInstance("MyMaterialInstance", material->get());
-					if (materialInstance)
+					Asset::MaterialDefinition def{
+					.Parameters = {
+						{"float1", Asset::ParameterType::float1},
+						{"int3", Asset::ParameterType::int3},
+						{"texture", Asset::ParameterType::tex2D}
+					},
+					.Properties = 0,
+					.MaterialShaderPath = std::string(ENGINE_SHADER_DIRECTORY) + "/testMaterial.slang",
+					.MaterialShaderName = "TestMaterial2"
+					};
+
+					auto material = materialSystem.CreateMaterial("MyMaterialType", def);
+					if (material)
 					{
-						materialInstance->get().SetParameter("float1", 6.7f);
-						materialInstance->get().SetParameter("int3", glm::ivec3(1, 2, 3));
-						materialInstance->get().SetParameter("texture", texture->get().GetDescriptorIndex());
-
-						testMaterialPtr = materialInstance->get().GetBDA();
-
-						Asset::MeshletMeshData meshData = aZero::File::ExtractGltfMeshletMesh(asset->meshes[0], asset);
-						auto mesh = meshSystem.CreateMesh("MyMesh", meshData);
-						if (mesh)
+						auto materialInstance = materialSystem.CreateMaterialInstance("MyMaterialInstance", material->get());
+						if (materialInstance)
 						{
-							// todo Create test entity that will get rendered
-							int x = 2;
+							materialInstance->get().SetParameter("float1", 6.7f);
+							materialInstance->get().SetParameter("int3", glm::ivec3(1, 2, 3));
+							materialInstance->get().SetParameter("texture", texture->get().GetDescriptorIndex());
+
+							testMaterialPtr = materialInstance->get().GetBDA();
+
+							Asset::MeshletMeshData meshData = aZero::Asset::ExtractGltfMeshletMesh(asset->meshes[0], asset);
+							auto mesh = meshSystem.CreateMesh("MyMesh", meshData);
+							if (mesh)
+							{
+								// todo Create test entity that will get rendered
+								int x = 2;
+							}
 						}
 					}
 				}
