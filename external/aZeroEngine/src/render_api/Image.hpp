@@ -23,11 +23,7 @@ namespace aZero::RenderAPI
         Image() = default;
         ~Image()
         {
-            if (!m_Desc.OptResourceRecycler.has_value() && m_diCore)
-            {
-                vmaDestroyImage(m_diCore->GetVmaAllocator(), m_Image, m_Allocation);
-            }
-            else if (m_Desc.OptResourceRecycler.has_value())
+            if (m_Desc.OptResourceRecycler.has_value())
             {
                 m_Desc.OptResourceRecycler.value().get().Recycle(m_Image, m_Allocation);
             }
@@ -48,12 +44,12 @@ namespace aZero::RenderAPI
             return *this;
         }
 
-        Image(Core& core, const Desc& desc)
+        Image(Core& core, const Desc& desc, std::optional<VkImage> optImage = std::nullopt)
         {
-            this->Init(core, desc);
+            this->Init(core, desc, optImage);
         }
 
-        bool Init(Core& core, const Desc& desc)
+        bool Init(Core& core, const Desc& desc, std::optional<VkImage> optImage = std::nullopt)
         {
             VkImageCreateInfo depthImageCI{
                 .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -73,23 +69,20 @@ namespace aZero::RenderAPI
                 .usage = VMA_MEMORY_USAGE_AUTO
             };
 
-            const bool succeeded = chkSucceed(vmaCreateImage(core.GetVmaAllocator(), &depthImageCI, &allocCI, &m_Image, &m_Allocation, nullptr));
+            bool succeeded = true;
+            
+            if (optImage.has_value())
+            {
+                m_Image = optImage.value();
+            }
+            else
+            {
+                succeeded = chkSucceed(vmaCreateImage(core.GetVmaAllocator(), &depthImageCI, &allocCI, &m_Image, &m_Allocation, nullptr));
+            }
 
             if (succeeded)
             {
-                m_LastBarrier = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-                .srcAccessMask = 0,
-                .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
-                .dstAccessMask = VK_ACCESS_2_NONE,
-                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .newLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image = m_Image,
-                .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_NONE, .levelCount = 1, .layerCount = 1 }
-                };
+                m_LastBarrier.image = m_Image;
 
                 if (!desc.Name.empty() && core.IsDebugNamesSupported())
                 {
@@ -180,7 +173,19 @@ namespace aZero::RenderAPI
         VkImage m_Image;
         VmaAllocation m_Allocation;
         Desc m_Desc;
-        VkImageMemoryBarrier2 m_LastBarrier;
+        VkImageMemoryBarrier2 m_LastBarrier {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+                .srcAccessMask = 0,
+                .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
+                .dstAccessMask = VK_ACCESS_2_NONE,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = m_Image,
+                .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_NONE, .levelCount = 1, .layerCount = 1 }
+        };
     };
 
     class ImageView : public DeleteCopy

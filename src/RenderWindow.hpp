@@ -36,7 +36,7 @@ public:
 
 	aZero::Input::DeviceManager& GetDeviceManager() { return m_DeviceManager; }
 
-	VkImage GetCurrentBackbuffer() { return m_SwapChain.GetCurrentBackBuffer(); }
+	VkImage GetCurrentBackbuffer() { return m_SwapChain.GetCurrentBackBuffer().Get(); }
 	//aZero::RenderAPI::SwapChain& GetSwapChain() { return m_SwapChain; }
 
 	aZero::RenderAPI::Swapchain m_SwapChain;

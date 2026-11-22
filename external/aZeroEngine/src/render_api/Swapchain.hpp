@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include "Core.hpp"
+#include "Image.hpp"
 #include "Semaphore.hpp"
 #include "CommandPool.hpp"
 #include "CommandQueue.hpp"
@@ -42,7 +43,7 @@ namespace aZero::RenderAPI
                 vkDestroySurfaceKHR(m_diCore->GetInstance(), m_Surface, nullptr);
                 for (auto& bbImageView : m_BackBufferViews)
                 {
-                    vkDestroyImageView(m_diCore->GetLogicalDevice(), bbImageView, nullptr);
+                    vkDestroyImageView(m_diCore->GetLogicalDevice(), bbImageView.Get(), nullptr);
                 }
             }
         }
@@ -113,18 +114,43 @@ namespace aZero::RenderAPI
                 return false;
             }
 
-            m_BackBuffers.resize(imageCount);
-            if(!chkSucceed(vkGetSwapchainImagesKHR(core.GetLogicalDevice(), m_Swapchain, &imageCount, m_BackBuffers.data())))
+            std::vector<VkImage> images(imageCount);
+            if(!chkSucceed(vkGetSwapchainImagesKHR(core.GetLogicalDevice(), m_Swapchain, &imageCount, images.data())))
             {
                 return false;
+            }
+
+            m_BackBuffers.reserve(imageCount);
+            for (auto& i : images)
+            {
+                RenderAPI::Image::Desc iDesc{
+                    .Format = swapchainCI.imageFormat,
+                    .Type = VkImageType::VK_IMAGE_TYPE_2D,
+                    .Usage = swapchainCI.imageUsage,
+                    .Width = swapchainCI.imageExtent.width,
+                    .Height = swapchainCI.imageExtent.height,
+                    .Depth = 1,
+                    .MipCount = 1,
+                    .ArrayLayers = 1
+                };
+                m_BackBuffers.emplace_back(core, iDesc, i);
             }
 
             m_BackBufferViews.resize(imageCount);
             m_ImageReadySemaphores.resize(imageCount);
             m_RenderCompleteSemaphores.resize(imageCount);
             for (auto i = 0; i < imageCount; i++) {
-                VkImageViewCreateInfo viewCI{ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = m_BackBuffers[i], .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = desc.Format, .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 } };
-                if(!chkSucceed(vkCreateImageView(core.GetLogicalDevice(), &viewCI, nullptr, &m_BackBufferViews[i])))
+                RenderAPI::ImageView::Desc vDesc{
+                    .Image = &m_BackBuffers[i],
+                    .Type = VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
+                    .ImageAspect = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT,
+                    .LayerStart = 0,
+                    .LayerCount = 1,
+                    .MipStart = 0,
+                    .MipCount = 1
+                };
+
+                if(!m_BackBufferViews[i].Init(core, vDesc))
                 {
                     return false;
                 }
@@ -137,7 +163,7 @@ namespace aZero::RenderAPI
                     VkDebugUtilsObjectNameInfoEXT nameInfo{};
                     nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
                     nameInfo.objectType = VK_OBJECT_TYPE_IMAGE;
-                    nameInfo.objectHandle = (uint64_t)m_BackBuffers[i];
+                    nameInfo.objectHandle = (uint64_t)m_BackBuffers[i].Get();
 
                     std::string debugName("Swapchain BB: ");
                     debugName += std::to_string(i);
@@ -183,28 +209,43 @@ namespace aZero::RenderAPI
             m_CreateInfo.oldSwapchain = m_Swapchain;
 
             chkSucceed(vkCreateSwapchainKHR(m_diCore->GetLogicalDevice(), &m_CreateInfo, nullptr, &m_Swapchain));
-            for (auto i = 0; i < m_BackBuffers.size(); i++) {
-                vkDestroyImageView(m_diCore->GetLogicalDevice(), m_BackBufferViews[i], nullptr);
-            }
+            m_BackBufferViews.clear();
 
             uint32_t newBackBufferCount;
             chkSucceed(vkGetSwapchainImagesKHR(m_diCore->GetLogicalDevice(), m_Swapchain, &newBackBufferCount, nullptr));
 
+            std::vector<VkImage> images(newBackBufferCount);
+            chkSucceed(vkGetSwapchainImagesKHR(m_diCore->GetLogicalDevice(), m_Swapchain, &newBackBufferCount, images.data()));
+
             m_BackBuffers.resize(newBackBufferCount);
-
-            chkSucceed(vkGetSwapchainImagesKHR(m_diCore->GetLogicalDevice(), m_Swapchain, &newBackBufferCount, m_BackBuffers.data()));
-
             m_BackBufferViews.resize(newBackBufferCount);
-            for (auto i = 0; i < newBackBufferCount; i++) {
-                VkImageViewCreateInfo viewCI{
-                    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                    .image = m_BackBuffers[i],
-                    .viewType = VK_IMAGE_VIEW_TYPE_2D,
-                    .format = m_CreateInfo.imageFormat,
-                    .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1}
+            for (uint32_t i = 0; i < newBackBufferCount; i++)
+            {
+                RenderAPI::Image::Desc iDesc{
+                    .Format = m_CreateInfo.imageFormat,
+                    .Type = VkImageType::VK_IMAGE_TYPE_2D,
+                    .Usage = m_CreateInfo.imageUsage,
+                    .Width = m_CreateInfo.imageExtent.width,
+                    .Height = m_CreateInfo.imageExtent.height,
+                    .Depth = 1,
+                    .MipCount = 1,
+                    .ArrayLayers = 1
                 };
-                chkSucceed(vkCreateImageView(m_diCore->GetLogicalDevice(), &viewCI, nullptr, &m_BackBufferViews[i]));
+                m_BackBuffers[i].Init(*m_diCore, iDesc, images[i]);
+
+                RenderAPI::ImageView::Desc vDesc{
+                        .Image = &m_BackBuffers[i],
+                        .Type = VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
+                        .ImageAspect = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT,
+                        .LayerStart = 0,
+                        .LayerCount = 1,
+                        .MipStart = 0,
+                        .MipCount = 1
+                };
+
+                m_BackBufferViews[i].Init(*m_diCore, vDesc);
             }
+
             m_RenderCompleteSemaphores.resize(m_BackBuffers.size());
             for (auto& semaphore : m_RenderCompleteSemaphores) {
                 semaphore = RenderAPI::Semaphore(*m_diCore, RenderAPI::ESemaphoreType::Binary);
@@ -215,8 +256,8 @@ namespace aZero::RenderAPI
         }
 
         uint32_t GetBackbufferCount() const { return m_BackBuffers.size(); }
-        VkImage GetCurrentBackBuffer() const { return m_BackBuffers.at(m_CurrentBackBuffer); }
-        VkImageView GetCurrentBackBufferView() const { return m_BackBufferViews.at(m_CurrentBackBuffer); }
+        RenderAPI::Image& GetCurrentBackBuffer() { return m_BackBuffers.at(m_CurrentBackBuffer); }
+        RenderAPI::ImageView& GetCurrentBackBufferView() { return m_BackBufferViews.at(m_CurrentBackBuffer); }
         RenderAPI::Semaphore* GetImageReadySemaphore() { return &m_ImageReadySemaphores.at(m_CurrentFrameIndex); }
         RenderAPI::Semaphore* GetRenderCompletedSemaphore() { return &m_RenderCompleteSemaphores.at(m_CurrentBackBuffer); }
         const VkSwapchainCreateInfoKHR& GetCreateInfo() const { return m_CreateInfo; }
@@ -265,8 +306,8 @@ namespace aZero::RenderAPI
         VkSurfaceKHR m_Surface;
 		VkSwapchainKHR m_Swapchain;
         VkSwapchainCreateInfoKHR m_CreateInfo;
-        std::vector<VkImage> m_BackBuffers;
-        std::vector<VkImageView> m_BackBufferViews;
+        std::vector<RenderAPI::Image> m_BackBuffers;
+        std::vector<RenderAPI::ImageView> m_BackBufferViews;
 
         /// <summary>
         /// Signalled when the back-buffer is acquired.

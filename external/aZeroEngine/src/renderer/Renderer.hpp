@@ -233,17 +233,14 @@ namespace aZero::Renderer
 				RenderAPI::CommandBuffer cb = m_CommandManager.GetBuffer();
 				cb.StartRecording(VkCommandBufferUsageFlagBits::VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-				VkImageMemoryBarrier2 scBarrier{
-					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-					.srcStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
-					.srcAccessMask = VK_ACCESS_2_NONE,
-					.dstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
-					.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-					.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-					.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-					.image = swapchain.GetCurrentBackBuffer(),
-					.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
+				RenderAPI::Image::TransitionDesc scDesc{
+					.DstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
+					.DstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+					.NewLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+					.SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
 				};
+
+				swapchain.GetCurrentBackBuffer().Transition(scDesc);
 
 				RenderAPI::Image::TransitionDesc srcDesc{
 					.DstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
@@ -254,7 +251,7 @@ namespace aZero::Renderer
 
 				srcTarget.m_Image.Transition(srcDesc);
 
-				cb.Barrier({}, { scBarrier, srcTarget.m_Image.GetTransition() }, {});
+				cb.Barrier({}, { swapchain.GetCurrentBackBuffer().GetTransition(), srcTarget.m_Image.GetTransition()}, {});
 
 				std::vector<VkImageBlit> blits(1);
 				blits[0] = {
@@ -279,19 +276,16 @@ namespace aZero::Renderer
 						{.x = (int32_t)swapchain.m_CreateInfo.imageExtent.width, .y = (int32_t)swapchain.m_CreateInfo.imageExtent.height, .z = 1}
 					},
 				};
-				cb.BlitImages(srcTarget.m_Image.Get(), srcTarget.m_Image.GetCurrentLayout(), swapchain.GetCurrentBackBuffer(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, blits, VkFilter::VK_FILTER_LINEAR);
+				cb.BlitImages(srcTarget.m_Image, swapchain.GetCurrentBackBuffer(), blits, VkFilter::VK_FILTER_LINEAR);
 				
-				scBarrier = {
-					.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-					.srcStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT,
-					.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-					.dstStageMask = VK_PIPELINE_STAGE_2_NONE,
-					.dstAccessMask = VK_ACCESS_2_NONE,
-					.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-					.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-					.image = swapchain.GetCurrentBackBuffer(),
-					.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
+				scDesc = {
+					.DstStageMask = VK_PIPELINE_STAGE_2_NONE,
+					.DstAccessMask = VK_ACCESS_2_NONE,
+					.NewLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+					.SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
 				};
+
+				swapchain.GetCurrentBackBuffer().Transition(scDesc);
 
 				srcDesc = {
 					.DstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -302,7 +296,7 @@ namespace aZero::Renderer
 
 				srcTarget.m_Image.Transition(srcDesc);
 
-				cb.Barrier({}, { scBarrier, srcTarget.m_Image.GetTransition() }, {});
+				cb.Barrier({}, { swapchain.GetCurrentBackBuffer().GetTransition(), srcTarget.m_Image.GetTransition() }, {});
 
 				cb.StopRecording();
 
@@ -704,19 +698,16 @@ namespace aZero::Renderer
 			srcTarget.m_Image.Transition(srcDesc);
 			//
 
-			VkImageMemoryBarrier2 scBarrier{
-				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-				.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				.srcAccessMask = VK_ACCESS_2_NONE,
-				.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-				.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				.image = swapchain.GetCurrentBackBuffer(),
-				.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
+			RenderAPI::Image::TransitionDesc scDesc{
+					.DstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					.DstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+					.NewLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+					.SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
 			};
 
-			cb.Barrier({}, { scBarrier, srcTarget.m_Image.GetTransition() }, {});
+			swapchain.GetCurrentBackBuffer().Transition(scDesc);
+
+			cb.Barrier({}, { swapchain.GetCurrentBackBuffer().GetTransition(), srcTarget.m_Image.GetTransition()}, {});
 
 			// render
 
@@ -767,7 +758,7 @@ namespace aZero::Renderer
 			};
 
 			Pipeline::RenderPass::RenderDesc::ColorTarget cTarget;
-			cTarget.View = swapchain.GetCurrentBackBufferView();
+			cTarget.View = swapchain.GetCurrentBackBufferView().Get();
 			rDesc.ColorTargets.push_back(cTarget);
 			m_FullscreenPass.Render(cb, rDesc);
 
@@ -776,34 +767,31 @@ namespace aZero::Renderer
 			// Prepares the hdr rtv for rendering
 			srcDesc = {
 				.DstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				.DstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+				.DstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
 				.NewLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				.SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
 			};
 			srcTarget.m_Image.Transition(srcDesc);
 			//
 
-			scBarrier = {
-				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-				.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				.dstStageMask = VK_PIPELINE_STAGE_2_NONE,
-				.dstAccessMask = VK_ACCESS_2_NONE,
-				.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-				.image = swapchain.GetCurrentBackBuffer(),
-				.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
+			scDesc = {
+					.DstStageMask = VK_PIPELINE_STAGE_2_NONE,
+					.DstAccessMask = VK_ACCESS_2_NONE,
+					.NewLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+					.SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
 			};
 
-			cb.Barrier({}, { scBarrier, srcTarget.m_Image.GetTransition() }, {});
+			swapchain.GetCurrentBackBuffer().Transition(scDesc);
+
+			cb.Barrier({}, { swapchain.GetCurrentBackBuffer().GetTransition(), srcTarget.m_Image.GetTransition() }, {});
 
 			//
 			cb.StopRecording();
 
 			aZero::RenderAPI::CommandQueue::SubmitDesc submitDesc{
 			   .CommandBuffers = {&cb },
-			   // Wait at "acquire image semaphore" when it's time to output to a target, aka in this case the back-buffer in the fullscreen pass.
-			   .WaitOnSemaphores = {{.SemaphorePtr = swapchain.GetImageReadySemaphore(), .Stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT}},
+			   // Wait at "acquire image semaphore" when it's time to output to a target, aka in this case the back-buffer in the fullscreen pass.6
+			   .WaitOnSemaphores = {{.SemaphorePtr = swapchain.GetImageReadySemaphore(), .Stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}},
 
 			   // Signal when all graphics-pipeline commands are done.
 			   .SignalSemaphores = {{.SemaphorePtr = swapchain.GetRenderCompletedSemaphore(), .Stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}, {.SemaphorePtr = &m_RenderSemaphore, .Stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}}
