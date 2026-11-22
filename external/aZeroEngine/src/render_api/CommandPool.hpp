@@ -112,6 +112,19 @@ namespace aZero::RenderAPI
             vkCmdEndRendering(m_CommandBuffer);
         }
 
+        struct DrawDesc
+        {
+            uint32_t VertexCount = 0;
+            uint32_t InstanceCount = 0;
+            uint32_t FirstVertex = 0;
+            uint32_t FirstInstance = 0;
+        };
+
+        void Draw(const DrawDesc& desc)
+        {
+            vkCmdDraw(m_CommandBuffer, desc.VertexCount, desc.InstanceCount, desc.FirstVertex, desc.FirstInstance);
+        }
+
         struct DrawIndexedDesc
         {
             uint32_t IndexCount = 0;
@@ -120,7 +133,6 @@ namespace aZero::RenderAPI
             int32_t  VertexOffset = 0;
             uint32_t FirstInstance = 0;
         };
-
         void DrawIndexed(const DrawIndexedDesc& drawDesc) const
         {
             vkCmdDrawIndexed(m_CommandBuffer, drawDesc.IndexCount, drawDesc.InstanceCount, drawDesc.FirstIndex, drawDesc.VertexOffset, drawDesc.FirstInstance);
@@ -184,6 +196,8 @@ namespace aZero::RenderAPI
 
         void Copy(const RenderAPI::Image& srcImage, VkImage dstImage, VkImageLayout dstImageLayout) const;
         void Copy(const RenderAPI::Image& srcImage, const RenderAPI::Image& dstImage) const;
+        void BlitImages(const RenderAPI::Image& srcImage, const RenderAPI::Image& dstImage, const std::vector<VkImageBlit>& blits, VkFilter filter) const;
+        void BlitImages(VkImage srcImage, VkImageLayout srcImageLayout, VkImage dstImage, VkImageLayout dstImageLayout, const std::vector<VkImageBlit>& blits, VkFilter filter) const;
 
         void ClearColorTarget(const RenderAPI::Image& image, const VkClearColorValue& color) const;
         void ClearDepthStencilTarget(const RenderAPI::Image& image, const VkClearDepthStencilValue& values) const;

@@ -1,4 +1,6 @@
 #pragma once
+#include <unordered_set>
+#include <unordered_map>
 #include "asset/texture/Texture.hpp"
 #include "render_api/Descriptor.hpp"
 #include "misc/IndexFreelist.hpp"
@@ -72,11 +74,10 @@ namespace aZero::System
             GpuTexture gpuTexture;
             gpuTexture.Texture.m_DescriptorIndex = m_IndexFreelist.New();
             gpuTexture.Texture.Name = name;
-            this->UploadTexture(data, gpuTexture);
-            gpuTexture.Texture.SetData(data);
-            gpuTexture.Texture.SetNotDirty(); // To avoid auto-uploading the asset
+            gpuTexture.Texture.m_diTextureSystem = this;
 
             auto [it, inserted] = m_Textures.emplace(name, std::move(gpuTexture));
+            it->second.Texture.SetData(data);
             return it->second.Texture;
         }
 
@@ -87,13 +88,13 @@ namespace aZero::System
                 // todo Handle all references to the texture.
                 //      Once descriptor heaps are used we can simply copy a fallback-texture-descriptor to the same slot via a commandbuffer+barrier.
 
+                m_DirtyTextures.erase(&texture);
                 m_DeferredDestroyedIndices[m_FrameIndex].push_back(iter->second.Descriptor.Index); // Saves the descriptor index so that it can't be reused until the resource isn't in use anymore.
                 m_DeferredDestroyedViews[m_FrameIndex].push_back(std::move(iter->second.View));
                 m_Textures.erase(iter); // Recycle the actual gpu resources via RAII :)
 
                 return;
             }
-
         }
 
         std::optional<std::reference_wrapper<Asset::Texture>> GetTexture(const std::string& name)
@@ -103,6 +104,11 @@ namespace aZero::System
                 return iter->second.Texture;
             }
             return std::nullopt;
+        }
+
+        void SetTextureDirty(const Asset::Texture& texture)
+        {
+            m_DirtyTextures.emplace(&texture);
         }
 
 	private:
@@ -124,20 +130,21 @@ namespace aZero::System
         void UpdateDirtyTextures()
         {
             bool hasUpdated = false;
-            for (auto& [name, gpuTexture] : m_Textures) // Horrible, but good for now...
+            for (const auto& texture : m_DirtyTextures)
             {
-                if (gpuTexture.Texture.IsDirty())
+                if (!hasUpdated)
                 {
-                    if (!hasUpdated)
-                    {
-                        // todo Since we want to make descriptorindices stable across updates we flush to be able to update the descriptors... Fix this once descriptor heaps are used...
-                        m_diCore->FlushGPU();
-                        hasUpdated = true;
-                    }
-                    gpuTexture.Texture.SetNotDirty();
-                    this->UploadTexture(gpuTexture.Texture.m_Data, gpuTexture);
+                    m_diCore->FlushGPU();
+                    hasUpdated = true;
+                }
+
+                if (auto iter = m_Textures.find(texture->Name); iter != m_Textures.end())
+                {
+                    this->UploadTexture(texture->m_Data, iter->second);
                 }
             }
+
+            m_DirtyTextures.clear();
         }
 
         void UploadTexture(const Asset::ImageData& data, GpuTexture& gpuTexture)
@@ -228,6 +235,7 @@ namespace aZero::System
             m_diFrameCommandBuffer->Barrier({}, { gpuTexture.Image.GetTransition() }, {});
         }
 
+        std::unordered_set<const Asset::Texture*> m_DirtyTextures;
         RenderAPI::CommandBuffer* m_diFrameCommandBuffer = nullptr;
         Renderer::ResourceRecycler* m_diRecycler = nullptr;
         RenderAPI::Core* m_diCore = nullptr;

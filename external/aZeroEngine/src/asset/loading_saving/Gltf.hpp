@@ -233,25 +233,19 @@ namespace aZero::Asset
 		Asset::PBRMaterialData pbrData;
 
 		if (material.pbrData.baseColorTexture.has_value()) {
-			auto imageIndex = asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.has_value() ?
-				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].imageIndex.value() :
-				asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.pbrData.baseColorTexture.value().textureIndex].basisuImageIndex.value() :
-				std::numeric_limits<uint32_t>::max();
 
-			pbrData.AlbedoTexture = imageIndex;
+			const fastgltf::Texture& texture = asset->textures[material.pbrData.baseColorTexture.value().textureIndex];
+			pbrData.AlbedoTexture = texture.imageIndex.value_or(texture.basisuImageIndex.value_or(std::numeric_limits<uint32_t>::max()));
 		}
 
 		if (material.normalTexture.has_value()) {
-			auto imageIndex = asset->textures[material.normalTexture.value().textureIndex].imageIndex.has_value() ?
-				asset->textures[material.normalTexture.value().textureIndex].imageIndex.value() :
-				asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.has_value() ? asset->textures[material.normalTexture.value().textureIndex].basisuImageIndex.value() :
-				std::numeric_limits<uint32_t>::max();
-
-			pbrData.NormalMap = imageIndex;
+			const fastgltf::Texture& texture = asset->textures[material.normalTexture.value().textureIndex];
+			pbrData.NormalMap = texture.imageIndex.value_or(texture.basisuImageIndex.value_or(std::numeric_limits<uint32_t>::max()));
 		}
 
 		if (material.pbrData.metallicRoughnessTexture.has_value()) {
-			// todo Impl
+			const fastgltf::Texture& texture = asset->textures[material.pbrData.metallicRoughnessTexture.value().textureIndex];
+			pbrData.RoughnessMetallic = texture.imageIndex.value_or(texture.basisuImageIndex.value_or(std::numeric_limits<uint32_t>::max()));
 		}
 
 		pbrData.RoughnessFactor = material.pbrData.roughnessFactor;
@@ -315,32 +309,21 @@ namespace aZero::Asset
 			std::vector<std::future<void>> tpHandles;
 
 			std::chrono::high_resolution_clock clock;
-
 			auto start = clock.now();
-			std::cout << "------------------------------------\nTextures loading... ";
+			std::cout << "\n------------------------------------\nStarted loading: " + path.string() << "\n------------------------------------\n";
+
 			this->Load_Images(path, &LoadedAsset, tp, tpHandles);
-			auto end = clock.now();
-			std::chrono::duration<double> diff = end - start;
-			std::cout << "Completed after: " << diff << "\n";
-
-			start = clock.now();
-			std::cout << "------------------------------------\nMeshes loading... ";
 			this->Load_And_Meshletize_Meshes(path, &LoadedAsset, tp, tpHandles);
-			end = clock.now();
-			diff = end - start;
-			std::cout << "Completed after: " << diff << "\n";
-
-			start = clock.now();
-			std::cout << "------------------------------------\nMaterials loading... ";
 			this->Load_Materials(&LoadedAsset);
-			end = clock.now();
-			diff = end - start;
-			std::cout << "Completed after: " << diff << "\n";
 
 			for (auto& handle : tpHandles)
 			{
 				handle.wait();
 			}
+
+			auto end = clock.now();
+			std::chrono::duration<double> diff = end - start;
+			std::cout << "\n------------------------------------\nCompleted after: " << diff.count() << " seconds\n------------------------------------\n";
 
 			return true;
 		}

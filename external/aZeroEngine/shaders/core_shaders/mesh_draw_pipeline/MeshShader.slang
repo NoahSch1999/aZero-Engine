@@ -21,7 +21,7 @@ void msMain(
 
         CameraData *camera = (CameraData *)Constants.CameraBufferPtr;
 
-        Meshlet *meshletBuffer = (Meshlet *)instanceData.MeshletBDA;
+        Meshlet *meshletBuffer = (Meshlet *)payload.MeshletBufferPtr;
         Meshlet *meshlet = &meshletBuffer[payload.MeshletIndex[groupIndex]];
         const uint vertexCount = meshlet.VertexCount;
         const uint primitiveCount = meshlet.PrimitiveCount;
@@ -34,7 +34,7 @@ void msMain(
     
         if (localThreadIndex < vertexCount)
         {
-            MeshVertex *vertexBuffer = (MeshVertex *)instanceData.VertexBDA;
+            MeshVertex *vertexBuffer = (MeshVertex *)payload.VertexBufferPtr;
             MeshVertex vertex = vertexBuffer[meshlet.VertexOffset + localThreadIndex];
             float4 positionWorld = mul(instanceData.WorldMatrix, float4(vertex.Position.xyz, 1.f));
             verts[localThreadIndex].WorldPosition = positionWorld.xyz;

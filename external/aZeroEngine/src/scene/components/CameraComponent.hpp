@@ -4,7 +4,7 @@
 
 namespace aZero::Component
 {
-	enum class ECameraType { ORTOGHRAPHIC, PERSPECTIVE, MAX };
+	enum class ECameraType { ORTOGRAPHIC, PERSPECTIVE, MAX };
 	class CameraComponent
 	{
 	public:

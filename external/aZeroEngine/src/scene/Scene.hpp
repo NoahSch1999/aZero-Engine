@@ -60,8 +60,6 @@ namespace aZero
 
 			flecs::world& GetWorld() { return m_World; }
 			SceneID GetSceneID() const { return m_SceneID; }
-			//flecs::query<> GetRootEntityQuery() const { return m_RootEntityQuery; }
-			bool LoadGltf(const std::filesystem::path& path, System::MeshSystem& meshSystem, System::MaterialSystem& matSystem, System::TextureSystem& tSystem);
 
 			flecs::entity GetStaticMeshPrefab() const { return m_StaticMeshPrefab; }
 			flecs::entity GetCameraPrefab() const { return m_CameraPrefab; }

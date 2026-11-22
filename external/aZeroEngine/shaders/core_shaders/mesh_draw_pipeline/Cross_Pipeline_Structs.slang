@@ -11,20 +11,24 @@ public struct CameraData
     public BoundingFrustum Frustum;
 };
 
+public struct SubmeshMetadata
+{
+    public BoundingSphere Bounds;
+    public uint64_t VertexBufferPtr;
+    public uint64_t MeshletBufferPtr;
+    public uint64_t MeshletBoundsBufferPtr;
+    public uint32_t MeshletCount;
+};
+
 public struct InstanceData
 {
     public float4x4 WorldMatrix;
-    public uint64_t MeshletBDA;
-    public uint64_t VertexBDA;
-    public uint64_t MeshletBoundsBDA;
     public uint64_t MaterialPtr;
-    public uint32_t MeshletCount;
 };
 
 public struct InstanceCullData
 {
-    public BoundingSphere WorldSpaceBounds;
-    public uint32_t MeshletCount;
+    public uint32_t SubmeshMetadataIndex;
     public uint32_t MaterialTypeIndex;
 };
 
@@ -47,8 +51,10 @@ public struct ComputeCullConstants
     public uint64_t IndirectArgumentBufferPtr;
     public uint64_t IndirectArgumentCounterBufferPtr;
     public uint64_t CameraBufferPtr;
+    public uint64_t InstanceDataBufferPtr;
     public uint64_t InstanceCullDataBufferPtr;
     public uint64_t DrawMetadataBufferPtr;
+    public uint64_t SubmeshMetadataBufferPtr;
     public uint32_t InstanceCount;
 };
 
@@ -63,6 +69,9 @@ public struct DrawMetaData
 {
     public uint32_t InstanceIndex;
     public uint32_t MeshletCount;
+    public uint64_t VertexBufferPtr;
+    public uint64_t MeshletBufferPtr;
+    public uint64_t MeshletBoundsBufferPtr;
 };
 
 public static const uint g_ThreadCount = 32;

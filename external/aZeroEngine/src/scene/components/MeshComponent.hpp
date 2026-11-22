@@ -10,6 +10,15 @@ namespace aZero::Component
     public:
         static constexpr uint32_t s_MaxNumberOfSubmeshes = 10;
 
+        struct Submesh
+        {
+            VkDeviceAddress MaterialPtr;
+            uint32_t MetadataIndex;
+            uint32_t MaterialTypeIndex;
+            const Asset::MaterialInstance* Material;
+            aZero::RefCounted<Asset::MaterialType> MaterialRef;
+        };
+
         MeshComponent() = default;
 
         MeshComponent(Asset::Mesh& mesh, Asset::MaterialInstance& material) {
@@ -19,16 +28,12 @@ namespace aZero::Component
         void SetMesh(Asset::Mesh& mesh, Asset::MaterialInstance& material) {
             if (mesh.IsValid() && material.IsValid()) {
                 m_Mesh = &mesh;
-                const auto& submeshes = mesh.GetSubmeshes();
-                m_NumSubmeshes = submeshes.size();
-                for (uint32_t i = 0; i < submeshes.size(); i++)
+                const auto& persistentData = mesh.GetPersistentData();
+                m_NumSubmeshes = persistentData.Submeshes.size();
+                for (uint32_t i = 0; i < persistentData.Submeshes.size(); i++)
                 {
                     Submesh newSubmesh;
-                    newSubmesh.MeshletCount = submeshes[i].MeshletCount;
-                    newSubmesh.MeshletBufferPtr = mesh.GetMeshletGpuPtr() + submeshes[i].MeshletOffset * sizeof(Asset::Meshlet);
-                    newSubmesh.VertexBufferPtr = mesh.GetVertexGpuPtr();
-                    newSubmesh.MeshletBoundsBufferPtr = mesh.GetMeshletBoundsGpuPtr() + submeshes[i].MeshletOffset * sizeof(BoundingVolume::BoundingSphere);
-                    newSubmesh.Bounds = submeshes[i].Bounds;
+                    newSubmesh.MetadataIndex = persistentData.SubmeshMetadataSlots[i];
                     newSubmesh.MaterialRef = material.GetReference();
                     m_Submeshes[i] = newSubmesh;
                     this->SetMaterial(i, material);
@@ -45,19 +50,13 @@ namespace aZero::Component
             }
         }
 
-        struct Submesh
-        {
-            aZero::BoundingVolume::BoundingSphere Bounds;
-            VkDeviceAddress MeshletBufferPtr, VertexBufferPtr, MeshletBoundsBufferPtr, MaterialPtr;
-            uint32_t MeshletCount, MaterialTypeIndex;
-            const Asset::MaterialInstance* Material;
-            aZero::RefCounted<Asset::MaterialType> MaterialRef;
-        };
+        std::span<const Submesh> GetSubmeshes() const {
+            return { m_Submeshes.data(), m_NumSubmeshes };
+        }
+    private:
 
         const Asset::Mesh* m_Mesh = nullptr;
         std::array<Submesh, s_MaxNumberOfSubmeshes> m_Submeshes;
         uint32_t m_NumSubmeshes = 0;
-
-    private:
     };
 }

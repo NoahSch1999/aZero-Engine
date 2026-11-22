@@ -2,6 +2,7 @@
 #include "src/RenderWindow.hpp"
 #include <SDL3/SDL_vulkan.h>
 #include "asset/loading_saving/Gltf.hpp"
+#include "ImguiInclude.hpp"
 
 namespace aZero::Editor
 {
@@ -38,6 +39,13 @@ namespace aZero::Editor
 			m_Engine->GetRenderer().NextFrame();
 
 			m_MainWindow = std::make_unique<RenderWindow>(Window::WindowDesc("aZero Engine", { 0,0,1920,1080 }, { 1,1,0,1 }, SDL_WINDOW_RESIZABLE, {}), m_Engine->GetCore(), m_Engine->GetRenderer());
+
+			m_Imgui.Init(m_Engine->GetCore(), m_Engine->GetRenderer(), 
+				m_MainWindow->GetSDLWindow(), m_MainWindow->GetVkSurfaceKHR(), 
+				m_MainWindow->GetClientDimensions()[0], m_MainWindow->GetClientDimensions()[1],
+				m_MainWindow->m_SwapChain.GetBackbufferCount(),
+				VkFormat::VK_FORMAT_R16G16B16A16_SFLOAT
+			);
 
 			auto cTargetRes = m_Engine->GetRenderer().CreateRenderTarget({
 				(uint32_t)m_MainWindow->GetClientDimensions()[0],
@@ -94,7 +102,6 @@ namespace aZero::Editor
 				Component::PointLightComponent pLight{
 					.Color = glm::vec3(1, 1, 1),
 					.Range = 2.f,
-					.Falloff = 0.f,
 					.Intensity = 1.f
 				};
 				ent.set(pLight);
@@ -106,7 +113,8 @@ namespace aZero::Editor
 			}
 
 			CurrentLoadingHandle = std::async(std::launch::async, [&] {
-				CurrentGltf.Load(std::string(PROJECT_DIRECTORY) + "scenes/sponza/sponza.gltf");
+				CurrentGltf.Load(std::string(PROJECT_DIRECTORY) + "scenes/sponza/sponza2.gltf");
+				//CurrentGltf.Load(std::string(PROJECT_DIRECTORY) + "scenes/test.gltf");
 			});
 
 			{
@@ -147,6 +155,7 @@ namespace aZero::Editor
 				ent.set(m);
 				ent.add<Component::StaticComponent>();
 			}
+
 			m_Engine->GetRenderer().FinalizeFrame();
 		}
 
@@ -154,6 +163,7 @@ namespace aZero::Editor
 		{
 			m_Scene.reset();
 			m_Engine->GetRenderer().FlushRenderingCommands();
+			m_Imgui.Shutdown(m_Engine->GetCore());
 			aZero::Window::Shutdown();
 		}
 
@@ -168,6 +178,8 @@ namespace aZero::Editor
 		void Update()
 		{
 			static float idk = 0.01f;
+			static float exposure = 1.f;
+			static aZero::Renderer::ETonemapType tonemap = aZero::Renderer::ETonemapType::REINHARD;
 			while (!m_Engine->GetRenderer().NextFrame(UINT64_MAX))
 			{
 				// do work while waiting
@@ -175,12 +187,18 @@ namespace aZero::Editor
 
 			m_MainWindow->HandleEvents();
 
-			m_MainWindow->m_SwapChain.NextFrame(m_Engine->GetRenderer().GetFrameIndex());
+			m_Imgui.BeginFrame();
+
+			//m_MainWindow->m_SwapChain.NextFrame(m_Engine->GetRenderer().GetFrameIndex());
 
 			// do frame stuff
 			if (CurrentLoadingHandle.valid() && CurrentLoadingHandle.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
 			{
-				std::cout << "Loading complete... ready to initialize scene..." << "\n";
+
+				std::cout << "\n------------------------------------\nInitializing scene\n------------------------------------\n";
+				std::chrono::high_resolution_clock clock;
+				auto start = clock.now();
+
 				m_Scene = std::make_unique<Scene::Scene>();
 				m_Scene->FromGltf(CurrentGltf, m_Engine->GetMeshSystem(), m_Engine->GetMaterialSystem(), m_Engine->GetTextureSystem());
 
@@ -211,10 +229,12 @@ namespace aZero::Editor
 					cam.add<Component::StaticComponent>();
 				}
 
-				std::cout << "Scene initialization complete!" << "\n";
+				auto end = clock.now();
+				std::chrono::duration<double> diff = end - start;
+				std::cout << "\n------------------------------------\nCompleted after: " << diff.count() << " seconds\n------------------------------------\n";
 				CurrentLoadingHandle = {};
 			}
-
+			static bool ssss = false;
 			auto cam = m_Scene->GetWorld().entity("camera");
 			if (cam.is_alive())
 			{
@@ -242,6 +262,38 @@ namespace aZero::Editor
 				{
 					cam.get_mut<Component::PositionComponent>().Position.y -= idk;
 				}
+				if (GetAsyncKeyState('M'))
+				{
+					m_Engine->GetMaterialSystem().GetMaterialInstance("MyMaterialInstance")->get().SetParameter("float1", 0.f);
+					ssss = true;
+				}
+				if (GetAsyncKeyState('N'))
+				{
+					m_Engine->GetMaterialSystem().GetMaterialInstance("MyMaterialInstance")->get().SetParameter("float1", 1.f);
+					ssss = false;
+				}
+				if (GetAsyncKeyState('9'))
+				{
+					exposure -= 0.001f;
+					exposure = std::max(exposure, 0.f);
+				}
+				if (GetAsyncKeyState('0'))
+				{
+					exposure += 0.001f;
+				}
+
+				if (GetAsyncKeyState('1'))
+				{
+					tonemap = aZero::Renderer::ETonemapType::NONE;
+				}
+				if (GetAsyncKeyState('2'))
+				{
+					tonemap = aZero::Renderer::ETonemapType::REINHARD;
+				}
+				if (GetAsyncKeyState('3'))
+				{
+					tonemap = aZero::Renderer::ETonemapType::ACES;
+				}
 			}
 			
 			m_Scene->MarkStaticMeshesDirty();
@@ -250,9 +302,10 @@ namespace aZero::Editor
 
 			m_Engine->GetRenderer().RenderScene(*m_Scene.get());
 
-			m_Engine->GetRenderer().CopyToSwapchain(m_ColorTarget, m_MainWindow->m_SwapChain);
+			m_Imgui.Render(m_Engine->GetRenderer(), m_ColorTarget.GetImage(), m_ColorTarget.GetImageView());
 
-			m_MainWindow->m_SwapChain.Present();
+			if(!ssss)
+				m_Engine->GetRenderer().PresentSwapchain(m_ColorTarget, m_MainWindow->m_SwapChain, exposure, tonemap);
 		}
 
 	private:
@@ -267,5 +320,6 @@ namespace aZero::Editor
 		std::unique_ptr<RenderWindow> m_MainWindow;
 		uint64_t m_FrameIndex = 0;
 		Input::KeyboardListener m_KeyboardListener;
+		aZero::ImGui_Wrapper m_Imgui;
 	};
 }

@@ -1,6 +1,6 @@
 #pragma once
 #include <imgui.h>
-#include <backends/imgui_impl_dx12.h>
+#include <backends/imgui_impl_vulkan.h>
 #include <backends/imgui_impl_sdl3.h>
 #include "Engine.hpp"
 
@@ -364,9 +364,27 @@ namespace aZero
         colors[ImGuiCol_SeparatorActive] = purple;
     }
 
+    static void check_vk_result(VkResult err)
+    {
+        if (err == VK_SUCCESS)
+            return;
+        fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
+        if (err < 0)
+            abort();
+    }
+
 	class ImGui_Wrapper
 	{
 	public:
+        VkAllocationCallbacks*   g_Allocator = nullptr;
+        uint32_t                 g_QueueFamily = (uint32_t)-1;
+        VkPipelineCache          g_PipelineCache = VK_NULL_HANDLE;
+        VkDescriptorPool         g_DescriptorPool = VK_NULL_HANDLE;
+
+        ImGui_ImplVulkanH_Window g_MainWindowData;
+        uint32_t                 g_MinImageCount = 2;
+        bool                     g_SwapChainRebuild = false;
+
         static void ComboBox(uint32_t& selectedIndex, const std::string& comboTitle, const std::vector<std::string>& options, std::function<void(uint32_t)> selectCallback)
         {
             if (ImGui::BeginCombo(comboTitle.c_str(), options[selectedIndex].c_str()))
@@ -389,76 +407,212 @@ namespace aZero
             }
         }
 
-		static void Init(Renderer::Renderer& renderer, SDL_Window* window)
-		{
-			//float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-
-			//ImGui::CreateContext();
-			//ImGuiIO& io = ImGui::GetIO(); (void)io;
-			//io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-			//io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
-			//io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
-			//io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-
-			//// Setup Dear ImGui style
-			////ImGui::StyleColorsDark();
-			////ImGui::StyleColorsLight();
-
-
-			//ImGui_ImplSDL3_InitForD3D(window);
-
-   //         // Setup scaling
-   //         ImGuiStyle& style = ImGui::GetStyle();
-   //         style.ScaleAllSizes(main_scale);        // Bake a fixed style scale. (until we have a solution for dynamic style scaling, changing this requires resetting Style + calling this again)
-   //         style.FontScaleDpi = main_scale;        // Set initial font scale. (in docking branch: using io.ConfigDpiScaleFonts=true automatically overrides this for every window depending on the current monitor)
-
-			//ImGui_ImplDX12_InitInfo init_info = {};
-			//init_info.Device = GetID3D12DeviceX(renderer.GetResourceHeap().Get());
-			//init_info.CommandQueue = renderer.GetGraphicsCommandQueue().Get();
-			//init_info.NumFramesInFlight = renderer.GetBufferingCount();
-			//init_info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-			//init_info.DSVFormat = DXGI_FORMAT_UNKNOWN;
-			//init_info.UserData = &renderer.GetResourceHeap();
-
-			//// Allocating SRV descriptors (for textures) is up to the application, so we provide callbacks.
-			//// (current version of the backend will only allocate one descriptor, future versions will need to allocate more)
-			//init_info.SrvDescriptorHeap = renderer.GetResourceHeap().Get();
-
-			//init_info.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_handle) {
-			//	RenderAPI::DescriptorHeap* heap = static_cast<RenderAPI::DescriptorHeap*>(info->UserData);
-			//	auto descriptor = heap->CreateDescriptor(false); // Leak
-			//	*out_cpu_handle = descriptor.GetCpuHandle();
-			//	*out_gpu_handle = descriptor.GetGpuHandle();
-			//	};
-
-			//init_info.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle) {};
-
-			//ImGui_ImplDX12_Init(&init_info);
-
-   //        // StyleColorsSpectrum();
-   //         StyleTransparent();
-		}
-
-		static void BeginFrame()
-		{
-			ImGui_ImplDX12_NewFrame();
-			ImGui_ImplSDL3_NewFrame();
-			ImGui::NewFrame();
-		}
-
-        static void EndFrame()
+        void Shutdown(RenderAPI::Core& core)
         {
-            ImGui::EndFrame();
+            ImGui_ImplVulkan_Shutdown();
+            ImGui_ImplSDL3_Shutdown();
+            ImGui::DestroyContext();
+
+            vkDestroyDescriptorPool(
+                core.GetLogicalDevice(),
+                g_DescriptorPool,
+                g_Allocator
+            );
         }
 
-		static void HandleMultiViewport()
+		void Init(RenderAPI::Core& core, Renderer::Renderer& renderer, SDL_Window* window, VkSurfaceKHR surface, uint32_t width, uint32_t height, uint32_t imageCount, VkFormat bbFormat)
+		{
+            struct ImGuiVulkanLoaderData
+            {
+                VkInstance instance;
+                VkDevice device;
+            };
+
+            ImGuiVulkanLoaderData loaderData{
+                core.GetInstance(),
+                core.GetLogicalDevice()
+            };
+
+            const bool loaded = ImGui_ImplVulkan_LoadFunctions(
+                VK_API_VERSION_1_3,
+                [](const char* function_name, void* user_data) -> PFN_vkVoidFunction
+                {
+                    auto* data = static_cast<ImGuiVulkanLoaderData*>(user_data);
+
+                    PFN_vkVoidFunction fn =
+                        vkGetInstanceProcAddr(data->instance, function_name);
+
+                    if (!fn)
+                        fn = vkGetDeviceProcAddr(data->device, function_name);
+
+                    return fn;
+                },
+                &loaderData
+            );
+
+            IM_ASSERT(loaded);
+
+            g_QueueFamily = core.GetIndexForQueueType(RenderAPI::EQueueType::Graphics);
+            
+            {
+                VkDescriptorPoolSize pool_sizes[] =
+                {
+                    { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE },
+                    { VK_DESCRIPTOR_TYPE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_SAMPLER_POOL_SIZE },
+                };
+                VkDescriptorPoolCreateInfo pool_info = {};
+                pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+                pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+                pool_info.maxSets = 0;
+                for (VkDescriptorPoolSize& pool_size : pool_sizes)
+                    pool_info.maxSets += pool_size.descriptorCount;
+                pool_info.poolSizeCount = (uint32_t)IM_COUNTOF(pool_sizes);
+                pool_info.pPoolSizes = pool_sizes;
+                VkResult err = vkCreateDescriptorPool(core.GetLogicalDevice(), &pool_info, g_Allocator, &g_DescriptorPool);
+                check_vk_result(err);
+            }
+		
+            float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
+            IMGUI_CHECKVERSION();
+            ImGui::CreateContext();
+            ImGuiIO& io = ImGui::GetIO(); (void)io;
+            io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+            io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+            io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // Enable Docking
+            //io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;       // Enable Multi-Viewport / Platform Windows
+            //io.ConfigFlags |= ImGuiConfigFlags_ViewportsNoTaskBarIcons;
+            //io.ConfigFlags |= ImGuiConfigFlags_ViewportsNoMerge;
+
+            // Setup Dear ImGui style
+            ImGuiStyle& style = ImGui::GetStyle();
+            ImGui::StyleColorsDark();
+            //ImGui::StyleColorsLight();
+            //style.FontSizeBase = 16.0f;           // Default to 13.0f when unspecified, which allows crisp legacy font for non-4K screens.
+            style.FrameRounding = 3.0f;
+            style.GrabRounding = 3.0f;
+
+            // Setup scaling
+            style.ScaleAllSizes(main_scale);        // Bake a fixed style scale. (until we have a solution for dynamic style scaling, changing this requires resetting Style + calling this again)
+            style.FontScaleDpi = main_scale;        // Set initial font scale. (in docking branch: using io.ConfigDpiScaleFonts=true automatically overrides this for every window depending on the current monitor)
+            io.ConfigDpiScaleFonts = true;          // [Experimental] Automatically overwrite style.FontScaleDpi in Begin() when Monitor DPI changes. This will scale fonts but _NOT_ scale sizes/padding for now.
+            io.ConfigDpiScaleViewports = true;      // [Experimental] Scale Dear ImGui and Platform Windows when Monitor DPI changes.
+
+            // When viewports are enabled we tweak WindowRounding/WindowBg so platform windows can look identical to regular ones.
+            if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+            {
+                style.WindowRounding = 0.0f;
+                style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+            }
+
+            // Setup Platform/Renderer backends
+            ImGui_ImplSDL3_InitForVulkan(window);
+            ImGui_ImplVulkan_InitInfo init_info = {};
+            //init_info.ApiVersion = VK_API_VERSION_1_3;              // Pass in your value of VkApplicationInfo::apiVersion, otherwise will default to header version.
+            init_info.Instance = core.GetInstance();
+            init_info.PhysicalDevice = core.GetPhysicalDevice();
+            init_info.Device = core.GetLogicalDevice();
+            init_info.QueueFamily = g_QueueFamily;
+            init_info.Queue = renderer.GetGraphicsQueue().Get();
+            init_info.PipelineCache = g_PipelineCache;
+            init_info.DescriptorPool = g_DescriptorPool;
+            init_info.MinImageCount = g_MinImageCount;
+            init_info.ImageCount = imageCount;
+            init_info.Allocator = g_Allocator;
+            init_info.UseDynamicRendering = true;
+            
+            VkFormat colorFormat = bbFormat;
+
+            VkPipelineRenderingCreateInfo pipelineRenderingInfo = {};
+            pipelineRenderingInfo.sType =
+                VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+
+            pipelineRenderingInfo.colorAttachmentCount = 1;
+            pipelineRenderingInfo.pColorAttachmentFormats = &colorFormat;
+
+            init_info.PipelineInfoMain.PipelineRenderingCreateInfo =
+                pipelineRenderingInfo;
+
+            init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+            init_info.CheckVkResultFn = check_vk_result;
+            bool result = ImGui_ImplVulkan_Init(&init_info);
+            assert(result);
+        }
+
+		void BeginFrame()
+		{
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplSDL3_NewFrame();
+            ImGui::NewFrame();
+		}
+
+        void Render(aZero::Renderer::Renderer& renderer, RenderAPI::Image& image, RenderAPI::ImageView& imageView)
+        {
+            auto commandBuffer = renderer.GetCommandManager().GetBuffer();
+            commandBuffer.StartRecording(VkCommandBufferUsageFlagBits::VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+            ImGui::Begin("Hello, world!");
+            static float f = 0.f;
+            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::End();
+
+            ImGui::Begin("Hello, world!!");
+            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::End();
+
+            VkRenderingInfo renderingInfo{
+                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                .renderArea = {.offset = {.x = 0, .y = 0}, .extent = {.width = image.GetDesc().Width, .height = image.GetDesc().Height}},
+                .layerCount = 1
+            };
+
+            VkRenderingAttachmentInfo colorAtt{ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                        .imageView = imageView.Get(),
+                        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                        .loadOp = VkAttachmentLoadOp::VK_ATTACHMENT_LOAD_OP_LOAD,
+                        .storeOp = VkAttachmentStoreOp::VK_ATTACHMENT_STORE_OP_STORE,
+                        .clearValue{.color = {.float32 = 0} }
+            };
+
+            renderingInfo.colorAttachmentCount = 1;
+            renderingInfo.pColorAttachments = &colorAtt;
+
+            {
+                RenderAPI::Image::TransitionDesc srcDesc{
+                    .DstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    .DstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                    .NewLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    .SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
+                };
+                image.Transition(srcDesc);
+                commandBuffer.Barrier({}, { image.GetTransition() }, {});
+            }
+
+            ImGui::Render();
+
+            commandBuffer.BeginRender(renderingInfo);
+
+            ImGui_ImplVulkan_RenderDrawData(
+                ImGui::GetDrawData(),
+                commandBuffer.Get()
+            );
+
+            commandBuffer.EndRender();
+
+            commandBuffer.StopRecording();
+            renderer.SubmitCommandBuffer(commandBuffer);
+
+            this->HandleMultiViewport();
+        }
+
+		void HandleMultiViewport()
 		{
 			ImGuiIO& io = ImGui::GetIO();
 			// Update and Render additional Platform Windows
 			if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
 			{
 				ImGui::UpdatePlatformWindows();
-				ImGui::RenderPlatformWindowsDefault();
+                ImGui::RenderPlatformWindowsDefault();
 			}
 		}
 	};

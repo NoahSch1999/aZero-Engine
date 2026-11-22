@@ -27,19 +27,15 @@ void WriteRenderFormat(aZero::GPUStruct::InstanceCullData* pObjCull, aZero::GPUS
 	aZero::GPUStruct::InstanceData instanceData;
 	instanceData.WorldMatrix = CreateWorldMatrix(position.Position, rotation.Rotation, scale.Scale);
 
-	for (uint32_t j = 0; j < mesh.m_NumSubmeshes; j++)
+	auto submeshes = mesh.GetSubmeshes();
+	for (uint32_t j = 0; j < submeshes.size(); j++)
 	{
 		aZero::GPUStruct::InstanceCullData objectCullData;
-		objectCullData.WorldSpaceBounds.Origin = instanceData.WorldMatrix * glm::vec4(mesh.m_Submeshes[j].Bounds.Origin, 1.f);
-		objectCullData.MeshletCount = mesh.m_Submeshes[j].MeshletCount;
-		objectCullData.MaterialTypeIndex = mesh.m_Submeshes[j].MaterialTypeIndex;
+		objectCullData.MaterialTypeIndex = submeshes[j].MaterialTypeIndex;
+		objectCullData.SubmeshMetadataIndex = submeshes[j].MetadataIndex;
 		*(pObjCull + instanceDataIndex) = objectCullData;
 
-		instanceData.MaterialPtr = mesh.m_Submeshes[j].MaterialPtr;
-		instanceData.MeshletBDA = mesh.m_Submeshes[j].MeshletBufferPtr;
-		instanceData.MeshletBoundsBDA = mesh.m_Submeshes[j].MeshletBoundsBufferPtr;
-		instanceData.VertexBDA = mesh.m_Submeshes[j].VertexBufferPtr;
-		instanceData.MeshletCount = mesh.m_Submeshes[j].MeshletCount;
+		instanceData.MaterialPtr = submeshes[j].MaterialPtr;
 		*(pInstance + instanceDataIndex) = instanceData;
 		instanceDataIndex++;
 	}
@@ -265,7 +261,6 @@ void aZero::Scene::Scene::UploadStaticLights(aZero::LinearAllocator<>& frameData
 				.Color = light.Color,
 				.Position = position.Position,
 				.Range = light.Range,
-				.Falloff = light.Falloff,
 				.Intensity = light.Intensity
 			};
 			*(plight + numLights) = l;
@@ -288,7 +283,8 @@ void aZero::Scene::Scene::UploadStaticLights(aZero::LinearAllocator<>& frameData
 				.Position = position.Position,
 				.Direction = rotation.Rotation,
 				.Intensity = light.Intensity,
-				.Radius = light.Radius
+				.InnerConeAngle = light.InnerConeAngle,
+				.OuterConeAngle = light.OuterConeAngle
 			};
 			*(plight + numLights) = l;
 			numLights++;
@@ -334,7 +330,6 @@ std::tuple<uint32_t, uint32_t, uint32_t> aZero::Scene::Scene::UploadDynamicLight
 				.Color = light.Color,
 				.Position = position.Position,
 				.Range = light.Range,
-				.Falloff = light.Falloff,
 				.Intensity = light.Intensity
 			};
 			*(plight + numPointLights) = l;
@@ -355,7 +350,8 @@ std::tuple<uint32_t, uint32_t, uint32_t> aZero::Scene::Scene::UploadDynamicLight
 				.Position = position.Position,
 				.Direction = rotation.Rotation,
 				.Intensity = light.Intensity,
-				.Radius = light.Radius
+				.InnerConeAngle = light.InnerConeAngle,
+				.OuterConeAngle = light.OuterConeAngle
 			};
 			*(plight + numSpotLights) = l;
 			numSpotLights++;
@@ -1240,7 +1236,7 @@ bool aZero::Scene::Scene::FromGltf(Asset::LoadedGltf& gltf, System::MeshSystem& 
 					entity.add<Component::StaticComponent>();
 				},
 				[&](const fastgltf::math::fmat4x4& tf) {
-
+					// todo Impl
 				}
 				}, node.transform);
 
@@ -1248,7 +1244,8 @@ bool aZero::Scene::Scene::FromGltf(Asset::LoadedGltf& gltf, System::MeshSystem& 
 				auto mesh = meshSystem.GetMesh(meshIndexToName[node.meshIndex.value()]);
 				if (mesh) {
 					Component::MeshComponent meshComponent(mesh.value().get(), defaultPbrInstance->get());
-					for (int32_t i = 0; i < meshComponent.m_NumSubmeshes; i++)
+					auto submeshes = meshComponent.GetSubmeshes();
+					for (int32_t i = 0; i < submeshes.size(); i++)
 					{
 						if (auto iter = materialIndexToName.find(gltf.LoadedAsset.meshes[node.meshIndex.value()].primitives[i].materialIndex.value()); iter != materialIndexToName.end())
 						{
@@ -1263,255 +1260,90 @@ bool aZero::Scene::Scene::FromGltf(Asset::LoadedGltf& gltf, System::MeshSystem& 
 					entity.set<Component::MeshComponent>(meshComponent);
 				}
 			}
-			//if (node.cameraIndex.has_value()) {
-			//	const fastgltf::Camera& camera = asset->cameras[node.cameraIndex.value()];
-			//	std::visit(fastgltf::visitor{
-			//		[](const auto& arg) {},
-			//		[&](const fastgltf::Camera::Perspective& perspective) {
-			//			Component::CameraComponent cameraComponent(Component::CameraComponent::EProjectionType::Perspective, static_cast<float>(perspective.yfov),
-			//				static_cast<float>(perspective.znear), perspective.zfar.has_value() ? static_cast<float>(perspective.zfar.value()) : 1000.f /* default to 1000.f */,
-			//				//perspective.aspectRatio.has_value() ? static_cast<float>(perspective.aspectRatio.value()) : 16.f / 9.f /* default to 16:9 */,
-			//				true, Helper::Rectangle(0,0,800,600)); // todo Handle loading with aspect ratio instead of hardcoding width and height
-			//			entity.set<Component::CameraComponent>(cameraComponent);
-			//		},
-			//		[&](const fastgltf::Camera::Orthographic orthographic) {
-			//			Component::CameraComponent cameraComponent(Component::Camera::EProjectionType::Ortographic, 0.f,
-			//				static_cast<float>(orthographic.znear), static_cast<float>(orthographic.zfar),
-			//				true, Helper::Rectangle(0,0,800,600)); // todo Handle loading using orthographic.xmag and orthographic.ymag
-			//			entity.set<Component::CameraComponent>(cameraComponent);
-			//		}
-			//		}, camera.camera);
-			//}
-			//if (node.lightIndex.has_value()) {
-			//	const fastgltf::Light& light = asset->lights[node.lightIndex.value()];
-			//	switch (light.type)
-			//	{
-			//	case fastgltf::LightType::Point:
-			//	{
-			//		Component::PointLightComponent p;
-			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
-			//		p.intensity = light.intensity;
-			//		entity.set<Component::PointLight>(p);
-			//		break;
-			//	}
-			//	case fastgltf::LightType::Spot:
-			//	{
-			//		Component::SpotLightComponent p;
-			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
-			//		p.intensity = light.intensity;
-
-			//		// todo Figure out which ones that should be used and how
-			//		/*p.coneAngle = light.innerConeAngle.has_value() ? light.innerConeAngle.value() : 0.f;
-			//		p.coneAngle = light.outerConeAngle.has_value() ? light.outerConeAngle.value() : 0.f;*/
-
-			//		entity.set<Component::SpotLightComponent>(p);
-			//		break;
-			//	}
-			//	case fastgltf::LightType::Directional:
-			//	{
-			//		Component::DirectionalLightComponent p;
-			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
-			//		p.intensity = light.intensity;
-			//		entity.set<Component::DirectionalLightComponent>(p);
-			//		break;
-			//	}
-			//	default:
-			//		break;
-			//	}
-			//}
-		});
-}
-
-// todo If fail -> empty
-bool aZero::Scene::Scene::LoadGltf(const std::filesystem::path& path, System::MeshSystem& meshSystem, System::MaterialSystem& matSystem, System::TextureSystem& tSystem)
-{
-	static constexpr auto supportedExtensions =
-		fastgltf::Extensions::KHR_mesh_quantization |
-		fastgltf::Extensions::KHR_texture_transform |
-		fastgltf::Extensions::KHR_materials_variants |
-		fastgltf::Extensions::KHR_lights_punctual |
-		fastgltf::Extensions::KHR_texture_basisu
-		;
-
-	fastgltf::Parser parser(supportedExtensions);
-
-	constexpr auto gltfOptions =
-		fastgltf::Options::DontRequireValidAssetMember |
-		fastgltf::Options::AllowDouble |
-		fastgltf::Options::LoadExternalBuffers |
-		//fastgltf::Options::LoadExternalImages |
-		fastgltf::Options::GenerateMeshIndices |
-		fastgltf::Options::DecomposeNodeMatrices
-		;
-
-	auto gltfFile = fastgltf::MappedGltfFile::FromPath(path);
-	if (!bool(gltfFile)) {
-		std::cerr << "Failed to open glTF file: " << fastgltf::getErrorMessage(gltfFile.error()) << '\n';
-		return false;
-	}
-
-	auto loadedAsset = parser.loadGltf(gltfFile.get(), path.parent_path(), gltfOptions);
-	fastgltf::Asset* asset = loadedAsset.get_if();
-	if (!asset) {
-		std::cerr << "Failed to load glTF file: " << fastgltf::getErrorMessage(loadedAsset.error()) << '\n';
-		return false;
-	}
-
-	std::chrono::high_resolution_clock clock;
-
-	auto start = clock.now();
-
-	// ------------------------------------------------------------------------------------------------------------------------------------------------
-	// LOAD TEXTURES
-	// ------------------------------------------------------------------------------------------------------------------------------------------------
-	std::cout << "------------------------------------\nTextures loading... ";
-
-	std::unordered_map<uint32_t, std::string> textureIndexToName = this->LoadGltf_Textures(path, tSystem, asset);
-
-	auto end = clock.now();
-	std::chrono::duration<double> diff = end - start;
-	std::cout << "Completed after: " << diff << "\n";
-
-	// ------------------------------------------------------------------------------------------------------------------------------------------------
-	// LOAD MESHES
-	// ------------------------------------------------------------------------------------------------------------------------------------------------
-	start = clock.now();
-
-	std::cout << "------------------------------------\nMeshes loading... ";
-
-	std::unordered_map<uint32_t, std::string> meshIndexToName = this->LoadGltf_Meshes(path, meshSystem, asset);
-
-	end = clock.now();
-	diff = end - start;
-	std::cout << "Completed after: " << diff << "\n";
-
-	// ------------------------------------------------------------------------------------------------------------------------------------------------
-	// LOAD MATERIALS
-	// ------------------------------------------------------------------------------------------------------------------------------------------------
-	start = clock.now();
-
-	std::cout << "------------------------------------\nMaterials loading... ";
-
-	std::unordered_map<uint32_t, std::string> materialIndexToName = this->LoadGltf_Materials(path, matSystem, tSystem, asset, textureIndexToName);
-
-	end = clock.now();
-	diff = end - start;
-	std::cout << "Completed after: " << diff << "\n";
-
-	// ------------------------------------------------------------------------------------------------------------------------------------------------
-	// LOAD NODES
-	// ------------------------------------------------------------------------------------------------------------------------------------------------
-	start = clock.now();
-
-	std::cout << "------------------------------------\nScene nodes loading... ";
-
-	auto defaultPbrInstance = matSystem.GetMaterialInstance(System::MaterialSystem::s_DefaultPBRInstanceStr);
-	if (!defaultPbrInstance)
-	{
-		return false;
-	}
-
-	fastgltf::iterateSceneNodes(*asset, 0, fastgltf::math::fmat4x4(),
-		[&](const fastgltf::Node& node, fastgltf::math::fmat4x4 matrix) {
-
-			flecs::entity entity = m_World.entity(node.name.c_str());
-			std::visit(fastgltf::visitor{
-				[](const auto& arg) {},
-				[&](const fastgltf::TRS& tf) {
-					Component::PositionComponent position(tf.translation.x(), tf.translation.y(), tf.translation.z());
-					glm::quat rotQuat(tf.rotation.w(), tf.rotation.x(), tf.rotation.y(), tf.rotation.z()); // glm::quat takes w as the first param while fastgltf takes it as the last... makes no sense when glm stores w last... bruv
-					glm::vec3 rotation = glm::degrees(glm::eulerAngles(rotQuat));
-					Component::ScaleComponent scale(tf.scale.x(), tf.scale.y(), tf.scale.z());
-					entity.set<Component::PositionComponent>(position);
-					entity.set<Component::RotationComponent>(rotation);
-					entity.set<Component::ScaleComponent>(scale);
-					entity.add<Component::StaticComponent>();
-				},
-				[&](const fastgltf::math::fmat4x4& tf) {
-
-				}
-				}, node.transform);
-
-			if (node.meshIndex.has_value()) {
-				auto mesh = meshSystem.GetMesh(meshIndexToName[node.meshIndex.value()]);
-				if (mesh) {
-					Component::MeshComponent meshComponent(mesh.value().get(), defaultPbrInstance->get());
-					for (int32_t i = 0; i < meshComponent.m_NumSubmeshes; i++)
-					{
-						if (auto iter = materialIndexToName.find(asset->meshes[node.meshIndex.value()].primitives[i].materialIndex.value()); iter != materialIndexToName.end())
-						{
-							auto submeshMaterial = matSystem.GetMaterialInstance(iter->second);
-							if (!submeshMaterial)
-							{
-								continue;
-							}
-							meshComponent.SetMaterial(i, submeshMaterial->get());
-						}
+			if (node.cameraIndex.has_value()) {
+				const fastgltf::Camera& camera = gltf.LoadedAsset.cameras[node.cameraIndex.value()];
+				std::visit(fastgltf::visitor{
+					[](const auto& arg) {},
+					[&](const fastgltf::Camera::Perspective& perspective) {
+						Component::CameraComponent cameraComponent{
+							.m_Type = Component::ECameraType::PERSPECTIVE,
+							.m_IsActive = false,
+							.m_PriorityIndex = 0,
+							.m_Fov = static_cast<float>(perspective.yfov),
+							.m_Top = 0.f,
+							.m_Left = 0.f,
+							.m_Bottom = 0.f,
+							.m_Right = 0.f,
+							.m_Near = static_cast<float>(perspective.znear),
+							.m_Far = perspective.zfar.value_or(1000.f),
+							.m_OptColorTarget = std::nullopt,
+							.m_OptDepthStencilTarget = std::nullopt,
+							.m_ClearColorTargetOnRender = true,
+							.m_ClearDepthStencilTargetOnRender = true
+						};
+						entity.set<Component::CameraComponent>(cameraComponent);
+					},
+					[&](const fastgltf::Camera::Orthographic orthographic) {
+						Component::CameraComponent cameraComponent{
+							.m_Type = Component::ECameraType::ORTOGRAPHIC,
+							.m_IsActive = false,
+							.m_PriorityIndex = 0,
+							.m_Fov = 0.f,
+							.m_Top = 0.f,
+							.m_Left = 0.f,
+							.m_Bottom = 0.f,
+							.m_Right = 0.f,
+							.m_Near = static_cast<float>(orthographic.znear),
+							.m_Far = static_cast<float>(orthographic.zfar),
+							.m_OptColorTarget = std::nullopt,
+							.m_OptDepthStencilTarget = std::nullopt,
+							.m_ClearColorTargetOnRender = true,
+							.m_ClearDepthStencilTargetOnRender = true
+						};
+						entity.set<Component::CameraComponent>(cameraComponent);
 					}
-					entity.set<Component::MeshComponent>(meshComponent);
+					}, camera.camera);
+			}
+			if (node.lightIndex.has_value()) {
+				const fastgltf::Light& light = gltf.LoadedAsset.lights[node.lightIndex.value()];
+				switch (light.type)
+				{
+				case fastgltf::LightType::Point:
+				{
+					Component::PointLightComponent l {
+						.Color = { light.color.x(), light.color.y(), light.color.z() },
+						.Range = light.range.value_or(100000.f), // todo Handle infinite range
+						.Intensity = light.intensity,
+					};
+					entity.set<Component::PointLightComponent>(l);
+					break;
+				}
+				case fastgltf::LightType::Spot:
+				{
+					Component::SpotLightComponent l{
+						.Color = { light.color.x(), light.color.y(), light.color.z() },
+						.Intensity = light.intensity,
+						.InnerConeAngle = light.innerConeAngle.value_or(0.f),
+						.OuterConeAngle = light.outerConeAngle.value_or(0.f),
+					};
+
+					entity.set<Component::SpotLightComponent>(l);
+					break;
+				}
+				case fastgltf::LightType::Directional:
+				{
+					Component::DirectionalLightComponent l{
+						.Color = { light.color.x(), light.color.y(), light.color.z() },
+						.Intensity = light.intensity,
+					};
+					entity.set<Component::DirectionalLightComponent>(l);
+					break;
+				}
+				default:
+					break;
 				}
 			}
-			//if (node.cameraIndex.has_value()) {
-			//	const fastgltf::Camera& camera = asset->cameras[node.cameraIndex.value()];
-			//	std::visit(fastgltf::visitor{
-			//		[](const auto& arg) {},
-			//		[&](const fastgltf::Camera::Perspective& perspective) {
-			//			Component::CameraComponent cameraComponent(Component::CameraComponent::EProjectionType::Perspective, static_cast<float>(perspective.yfov),
-			//				static_cast<float>(perspective.znear), perspective.zfar.has_value() ? static_cast<float>(perspective.zfar.value()) : 1000.f /* default to 1000.f */,
-			//				//perspective.aspectRatio.has_value() ? static_cast<float>(perspective.aspectRatio.value()) : 16.f / 9.f /* default to 16:9 */,
-			//				true, Helper::Rectangle(0,0,800,600)); // todo Handle loading with aspect ratio instead of hardcoding width and height
-			//			entity.set<Component::CameraComponent>(cameraComponent);
-			//		},
-			//		[&](const fastgltf::Camera::Orthographic orthographic) {
-			//			Component::CameraComponent cameraComponent(Component::Camera::EProjectionType::Ortographic, 0.f,
-			//				static_cast<float>(orthographic.znear), static_cast<float>(orthographic.zfar),
-			//				true, Helper::Rectangle(0,0,800,600)); // todo Handle loading using orthographic.xmag and orthographic.ymag
-			//			entity.set<Component::CameraComponent>(cameraComponent);
-			//		}
-			//		}, camera.camera);
-			//}
-			//if (node.lightIndex.has_value()) {
-			//	const fastgltf::Light& light = asset->lights[node.lightIndex.value()];
-			//	switch (light.type)
-			//	{
-			//	case fastgltf::LightType::Point:
-			//	{
-			//		Component::PointLightComponent p;
-			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
-			//		p.intensity = light.intensity;
-			//		entity.set<Component::PointLight>(p);
-			//		break;
-			//	}
-			//	case fastgltf::LightType::Spot:
-			//	{
-			//		Component::SpotLightComponent p;
-			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
-			//		p.intensity = light.intensity;
-
-			//		// todo Figure out which ones that should be used and how
-			//		/*p.coneAngle = light.innerConeAngle.has_value() ? light.innerConeAngle.value() : 0.f;
-			//		p.coneAngle = light.outerConeAngle.has_value() ? light.outerConeAngle.value() : 0.f;*/
-
-			//		entity.set<Component::SpotLightComponent>(p);
-			//		break;
-			//	}
-			//	case fastgltf::LightType::Directional:
-			//	{
-			//		Component::DirectionalLightComponent p;
-			//		p.color = { light.color.x(), light.color.y(), light.color.z() };
-			//		p.intensity = light.intensity;
-			//		entity.set<Component::DirectionalLightComponent>(p);
-			//		break;
-			//	}
-			//	default:
-			//		break;
-			//	}
-			//}
 		});
-
-	end = clock.now();
-	diff = end - start;
-	std::cout << "Completed after: " << diff << "\n";
-
+	
 	return true;
 }

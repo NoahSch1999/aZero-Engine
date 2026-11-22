@@ -1,5 +1,6 @@
 #pragma once
 #include "GLM_Include.hpp"
+#include <string>
 
 namespace aZero::Helpers
 {

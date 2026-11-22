@@ -8,6 +8,8 @@ public struct Payload
     public uint MeshletIndex[32];
     public uint InstanceIndex;
     public uint MeshletCount;
+    public uint64_t VertexBufferPtr;
+    public uint64_t MeshletBufferPtr;
 };
 
 // MESH ASSET STRUCTS

@@ -7,7 +7,6 @@ namespace aZero::Component
     {
         glm::vec3 Color;
         float Range;
-        float Falloff;
         float Intensity;
     };
 
@@ -15,7 +14,8 @@ namespace aZero::Component
     {
         glm::vec3 Color;
         float Intensity;
-        float Radius;
+        float InnerConeAngle;
+        float OuterConeAngle;
     };
 
     struct DirectionalLightComponent

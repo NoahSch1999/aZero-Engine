@@ -2,6 +2,7 @@
 #include <variant>
 #include "Primitives.hpp"
 #include "asset/AssetData.hpp"
+#include <numeric>
 
 namespace aZero::System { class MeshSystem; }
 
@@ -27,41 +28,29 @@ namespace aZero::Asset
 		}
 	};
 
-	using MeshBufferPtr = VkDeviceAddress;
-	constexpr MeshBufferPtr g_InvalidMeshBufferPtr = std::numeric_limits<MeshBufferPtr>::max();
+	struct PersistentMeshData
+	{
+		std::vector<Asset::MeshletSubMesh> Submeshes;
+		std::vector<uint32_t> SubmeshMetadataSlots;
+	};
+
 	class Mesh : public Asset::AssetBase
 	{
 		friend class System::MeshSystem;
 	public:
 		Mesh() = default;
-		Mesh(const std::variant<Asset::LegacyMeshData, Asset::MeshletMeshData>& data)
-			:m_Data(data)
-		{
-			m_MeshletCount = std::get<Asset::MeshletMeshData>(m_Data).Meshlets.size();
-			m_Submeshes = std::get<Asset::MeshletMeshData>(m_Data).Submeshes;
-		}
-		void SetData(const std::variant<Asset::LegacyMeshData, Asset::MeshletMeshData>& data) { 
-			m_Data = data; m_IsDirty = true; 
-			m_MeshletCount = std::get<Asset::MeshletMeshData>(m_Data).Meshlets.size();
-			m_Submeshes = std::get<Asset::MeshletMeshData>(m_Data).Submeshes;
-		}
-		void SetNotDirty() { m_IsDirty = false; }
-		bool IsDirty() const { return m_IsDirty; }
+		Mesh(const std::variant<Asset::LegacyMeshData, Asset::MeshletMeshData>& data, System::MeshSystem& diMeshSystem);
+
+		void SetDirty();
 
 		// todo Handle legacy mesh
-		MeshBufferPtr GetVertexGpuPtr() const { return VertexBufferPtr; }
-		MeshBufferPtr GetMeshletGpuPtr() const { return MeshletBufferPtr; }
-		MeshBufferPtr GetMeshletBoundsGpuPtr() const { return MeshletBoundsBufferPtr; }
-		uint32_t GetMeshletCount() const { return m_MeshletCount; }
-		const std::vector<Asset::MeshletSubMesh>& GetSubmeshes() const { return m_Submeshes; }
-		bool IsValid() const { return VertexBufferPtr != g_InvalidMeshBufferPtr; }
+		const PersistentMeshData& GetPersistentData() const { return m_PersistentData; }
+		bool IsValid() const { return !m_PersistentData.SubmeshMetadataSlots.empty() && m_PersistentData.SubmeshMetadataSlots.size() == m_PersistentData.Submeshes.size(); }
 	private:
 		std::variant<Asset::LegacyMeshData, Asset::MeshletMeshData> m_Data;
 
 		// todo Store animation information such as per-vertex weights
-		bool m_IsDirty = true;
-		uint32_t m_MeshletCount;
-		std::vector<Asset::MeshletSubMesh> m_Submeshes;
-		MeshBufferPtr VertexBufferPtr = g_InvalidMeshBufferPtr, MeshletBufferPtr = g_InvalidMeshBufferPtr, MeshletBoundsBufferPtr = g_InvalidMeshBufferPtr;
+		System::MeshSystem* m_diMeshSystem = nullptr;
+		PersistentMeshData m_PersistentData;
 	};
 }

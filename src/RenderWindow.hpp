@@ -40,23 +40,27 @@ public:
 	//aZero::RenderAPI::SwapChain& GetSwapChain() { return m_SwapChain; }
 
 	aZero::RenderAPI::Swapchain m_SwapChain;
+	VkSurfaceKHR GetVkSurfaceKHR() const { return m_Surface; }
 private:
 	void PollEventImpl(const SDL_Event& event) final {
-		if (event.type == SDL_EVENT_QUIT) {
-			this->Close();
-		}
-		else if (event.type == SDL_EVENT_KEY_UP)
+		
+		switch (event.type) 
 		{
-			if (event.key.key == SDLK_1)
+			case SDL_EVENT_WINDOW_RESIZED:
 			{
+				int32_t width = event.window.data1;
+				int32_t height = event.window.data2;
 
+				m_SwapChain.Resize(width, height);
+				break;
 			}
-			else if (event.key.key == SDLK_2)
+			case SDL_EVENT_QUIT:
 			{
-
+				this->Close();
+				break;
 			}
-			
 		}
+
 		//ImGui_ImplSDL3_ProcessEvent(&event);
 		m_DeviceManager.ProcessEvent(event);
 	}

@@ -198,6 +198,9 @@ add_library(${PROJECT_NAME}
     "src/physics/PhysicsEngine.cpp"
     "src/physics/PhysicsWorld.cpp"
     "src/render_api/CommandPool.cpp"
+    "src/asset/material/MaterialInstance.cpp"
+    "src/asset/texture/Texture.cpp"
+    "src/asset/mesh/Mesh.cpp"
     "src/render_api/VolkImpl.cpp"
     "src/scene/Scene.cpp"
 )

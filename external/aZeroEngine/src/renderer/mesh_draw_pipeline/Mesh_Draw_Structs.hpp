@@ -13,17 +13,12 @@ namespace aZero::GPUStruct
     struct InstanceData
     {
         glm::mat4x4 WorldMatrix;
-        VkDeviceAddress MeshletBDA;
-        VkDeviceAddress VertexBDA;
-        VkDeviceAddress MeshletBoundsBDA;
         VkDeviceAddress MaterialPtr;
-        uint32_t MeshletCount;
     };
 
     struct InstanceCullData
     {
-        aZero::BoundingVolume::BoundingSphere WorldSpaceBounds;
-        uint32_t MeshletCount;
+        uint32_t SubmeshMetadataIndex;
         uint32_t MaterialTypeIndex;
     };
 
@@ -48,8 +43,10 @@ namespace aZero::GPUStruct
         VkDeviceAddress IndirectArgumentBufferPtr;
         VkDeviceAddress IndirectArgumentCounterBufferPtr;
         VkDeviceAddress CameraBufferPtr;
+        VkDeviceAddress InstanceDataBufferPtr;
         VkDeviceAddress InstanceCullDataBufferPtr;
         VkDeviceAddress DrawMetadataBufferPtr;
+        VkDeviceAddress SubmeshMetadataBufferPtr;
         uint32_t InstanceCount;
     };
 
@@ -65,10 +62,22 @@ namespace aZero::GPUStruct
         uint32_t Count;
     };
 
+    struct SubmeshMetadata
+    {
+        aZero::BoundingVolume::BoundingSphere Bounds;
+        VkDeviceAddress VertexBufferPtr = 0;
+        VkDeviceAddress MeshletBufferPtr = 0;
+        VkDeviceAddress MeshletBoundsBufferPtr = 0;
+        uint32_t MeshletCount = 0;
+    };
+
     struct DrawMetaData
     {
         uint32_t InstanceIndex;
         uint32_t MeshletCount;
+        uint64_t VertexBufferPtr;
+        uint64_t MeshletBufferPtr;
+        uint64_t MeshletBoundsBufferPtr;
     };
 
     struct PBRMaterial
@@ -86,7 +95,6 @@ namespace aZero::GPUStruct
          glm::vec3 Color;
          glm::vec3 Position;
          float Range;
-         float Falloff;
          float Intensity;
     };
 
@@ -96,7 +104,8 @@ namespace aZero::GPUStruct
          glm::vec3 Position;
          glm::vec3 Direction;
          float Intensity;
-         float Radius;
+         float InnerConeAngle;
+         float OuterConeAngle;
     };
 
     struct DirectionalLight

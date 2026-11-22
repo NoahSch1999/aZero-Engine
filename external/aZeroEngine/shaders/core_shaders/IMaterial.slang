@@ -3,6 +3,8 @@ module IMaterial;
 import Lights;
 import RasterVertex;
 
+public static const uint32_t gInvalidTexture = 0xFFFFFFFF;
+
 [[vk::binding(0, 0)]]
 public Sampler2D textures[];
 

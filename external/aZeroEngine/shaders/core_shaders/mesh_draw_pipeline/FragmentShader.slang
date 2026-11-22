@@ -9,7 +9,7 @@ struct Output
 };
 
 [shader("fragment")]
-Output psMain<T : IMaterial>(RasterVertex input)
+Output fsMain<T : IMaterial>(RasterVertex input)
 {
     Output outputStruct;
     outputStruct.output = float4(0, 0, 0, 1);

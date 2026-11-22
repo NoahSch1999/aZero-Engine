@@ -85,7 +85,7 @@ namespace aZero::System
 				},
 				{
 					slang::CompilerOptionName::Optimization,
-					{slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_NONE}
+					{slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_NONE} // todo Change based on build
 				}
 				})
 			};
@@ -151,7 +151,7 @@ namespace aZero::System
 				name,
 				MaterialInstanceAllocationInfo{
 					.Allocation = allocation,
-					.Instance = Asset::MaterialInstance(material, name, instanceBDA)
+					.Instance = Asset::MaterialInstance(material, name, instanceBDA, *this)
 				});
 			return it->second.Instance;
 		}
@@ -165,7 +165,6 @@ namespace aZero::System
 					std::erase_if(m_MaterialInstances, [&](auto& kv) {
 						if (kv.second.Instance.m_diMaterial->m_RuntimeTypeID == iter->second.MaterialBase.GetRuntimeTypeID())
 						{
-							//m_DeferredAllocationHandler[m_FrameIndex].push_back(kv.second.Allocation);
 							m_Allocator.Free(kv.second.Allocation);
 							kv.second.Instance.m_InstanceBDA = Asset::g_InvalidInstanceBDA;
 
@@ -187,7 +186,7 @@ namespace aZero::System
 			{
 				if (iter->second.Instance.m_InstanceBDA == instance.m_InstanceBDA)
 				{
-					//m_DeferredAllocationHandler[m_FrameIndex].push_back(iter->second.Allocation);
+					m_DirtyInstances.erase(&instance);
 					m_Allocator.Free(iter->second.Allocation);
 					m_MaterialInstances.erase(iter);
 
@@ -219,11 +218,16 @@ namespace aZero::System
 		std::vector<uint32_t> GetMaterialTypeCounts() const
 		{
 			std::vector<uint32_t> counts;
-			for (auto& [name, material] : m_Materials) // Horrible, but good for now...
+			for (auto& [name, material] : m_Materials) // Horrible, but good for now... As long as we dont have a bajillion unique material types...
 			{
 				counts.push_back(material.MaterialBase.m_Refcount);
 			}
 			return counts;
+		}
+
+		void SetMaterialInstanceDirty(const Asset::MaterialInstance& instance)
+		{
+			m_DirtyInstances.emplace(&instance);
 		}
 		
 	private:
@@ -242,7 +246,7 @@ namespace aZero::System
 			std::optional<Compiler::ShaderModule> optMaterialModule;
 
 			Compiler::ShaderProgram::MeshletDesc msProgramDesc{
-				.EntryPoints = {{"asMain"}, {"msMain"},{"psMain", {allocationInfo.MaterialBase.GetDefinition().MaterialShaderName}}},
+				.EntryPoints = {{"asMain"}, {"msMain"},{"fsMain", {allocationInfo.MaterialBase.GetDefinition().MaterialShaderName}}},
 				.Modules = {&m_TaskShader, &m_MeshShader, &m_FragmentShader}
 			};
 
@@ -263,7 +267,7 @@ namespace aZero::System
 			Pipeline::RenderPass::MeshShaderPassDesc mspDesc;
 			mspDesc.Program = &program;
 			mspDesc.DepthDesc = Pipeline::RenderPass::Desc::DepthStencil();
-			mspDesc.RenderTargetFormats = { VK_FORMAT_R8G8B8A8_SRGB };
+			mspDesc.RenderTargetFormats = { /*VkFormat::VK_FORMAT_R8G8B8A8_SRGB*/VK_FORMAT_R16G16B16A16_SFLOAT /*HDR format*/}; // todo Test VK_FORMAT_B10G11R11_UFLOAT_PACK32
 			mspDesc.RasterDesc.CullMode = VkCullModeFlagBits::VK_CULL_MODE_BACK_BIT;
 			if (!inoutPass.Compile(mspDesc))
 			{
@@ -275,14 +279,12 @@ namespace aZero::System
 
 		void UpdateDirtyMaterials(Renderer::FrameAllocator& allocator)
 		{
-			for (auto& [name, materialInstance] : m_MaterialInstances) // Horrible, but good for now...
+			Asset::MaterialInstanceBDA baseBDA = m_MaterialInstanceBuffer.GetDeviceAddress().value();
+			for (auto& instance : m_DirtyInstances) // Mediocre at best, but good for now...
 			{
-				if (materialInstance.Instance.IsDirty())
-				{
-					allocator.Allocate(materialInstance.Instance.m_Data, m_MaterialInstanceBuffer, materialInstance.Allocation.Offset);
-					materialInstance.Instance.SetNotDirty();
-				}
+				allocator.Allocate(instance->m_Data, m_MaterialInstanceBuffer, instance->GetBDA() - baseBDA);
 			}
+			m_DirtyInstances.clear();
 		}
 
 		RenderAPI::Core* m_diCore = nullptr;
@@ -292,6 +294,7 @@ namespace aZero::System
 		aZero::DS::IndexFreelist<Asset::MaterialRuntimeTypeID> m_MaterialTypeIndexList;
 		std::unordered_map<std::string, MaterialAllocationInfo> m_Materials;
 		//std::vector<Pipeline::RenderPass> m_Passes;
+		std::unordered_set<const Asset::MaterialInstance*> m_DirtyInstances;
 		std::unordered_map<std::string, MaterialInstanceAllocationInfo> m_MaterialInstances;
 		uint32_t m_FrameIndex;
 		Compiler::Compiler* m_diCompiler = nullptr;

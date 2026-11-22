@@ -50,7 +50,7 @@ public struct TestMaterial2 : IMaterial
              float3 dir = l.Position - vertex.WorldPosition; // fragment wp to light dir
              output = output * l.Color * max(dot(dir, vertex.Normal), 0.f);
         }
-        return float4(output, 1.f);
+        return float4(color, 1.f);
     }
     public float4 CalcSpotLights(float4 fragmentInput, uint64_t materialPtr, RasterVertex vertex, SpotLight *lights, uint32_t numLights)
     {
@@ -58,6 +58,9 @@ public struct TestMaterial2 : IMaterial
     }
     public float4 CalcDirectionalLights(float4 fragmentInput, uint64_t materialPtr, RasterVertex vertex, DirectionalLight *lights, uint32_t numLights)
     {
+        // let mat = (Data *)materialPtr;
+        // float4 ret = float4(mat.x, 0, 0, 1);
+        // return ret;
         return float4(fragmentInput);
     }
 }

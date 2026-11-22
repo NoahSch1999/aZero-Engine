@@ -449,6 +449,13 @@ namespace aZero::Compiler
                     for (uint32_t k = 0; k < set.binding_count; k++)
                     {
                         const SpvReflectDescriptorBinding& binding = *set.bindings[k];
+#if USE_DEBUG
+                        if (std::string(binding.name) == "globalParams")
+                        {
+                            std::cout << "\n\nWARNING! Compilation indroduced 'globalParams' due to non-static global-scoped variable in a module.\n\n";
+                        }
+#endif
+
                         if (!dsRefl[set.set].LayoutBindings.contains(binding.binding))
                         {
                             VkDescriptorSetLayoutBinding vkBinding{
@@ -651,6 +658,21 @@ namespace aZero::Compiler
                 preMacros.push_back({ macro.Name.c_str(), macro.Value.c_str() });
             }
 
+            auto options = desc.CompilerOptions;
+#if USE_DEBUG == 0
+            for (auto& option : options)
+            {
+                /*if (option.name == slang::CompilerOptionName::DebugInformation)
+                {
+                    option.value = { slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_NONE };
+                }
+                else */if (option.name == slang::CompilerOptionName::Optimization)
+                {
+                    option.value = { slang::CompilerOptionValueKind::Int, SLANG_OPTIMIZATION_LEVEL_MAXIMAL };
+                }
+            }
+#endif
+
             slang::SessionDesc slangSessionDesc{
                 .targets{slangTargets.data()},
                 .targetCount{SlangInt(slangTargets.size())},
@@ -659,8 +681,8 @@ namespace aZero::Compiler
                 .searchPathCount = static_cast<SlangInt>(pathPtrs.size()),
                 .preprocessorMacros = preMacros.data(),
                 .preprocessorMacroCount = static_cast<SlangInt>(preMacros.size()),
-                .compilerOptionEntries{desc.CompilerOptions.data()},
-                .compilerOptionEntryCount{uint32_t(desc.CompilerOptions.size())}
+                .compilerOptionEntries{options.data()},
+                .compilerOptionEntryCount{uint32_t(options.size())}
             };
 
             Slang::ComPtr<slang::ISession> slangSession;

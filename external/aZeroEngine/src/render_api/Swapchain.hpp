@@ -5,28 +5,32 @@
 #include "CommandPool.hpp"
 #include "CommandQueue.hpp"
 
+namespace aZero::Renderer { class Renderer; }
+
 namespace aZero::RenderAPI
 {
-    static inline void chkSwapchain(VkResult result) {
+    static inline bool chkSwapchain(VkResult result) {
         if (result < VK_SUCCESS) {
             if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-                //updateSwapchain = true;
-                return;
+                return false;
             }
             std::cerr << "Vulkan call returned an error (" << result << ")\n";
-            exit(result);
+            return false;
         }
+        return true;
     }
 
 	class Swapchain : public DeleteCopy
 	{
+        friend class aZero::Renderer::Renderer;
 	public:
         struct Desc
         {
-            VkSurfaceKHR Surface;
-            VkFormat Format;
-            uint32_t FramesInFlight;
-            uint32_t Width, Height;
+            VkSurfaceKHR Surface = nullptr;
+            VkFormat Format = VkFormat::VK_FORMAT_UNDEFINED;
+            uint32_t FramesInFlight = 1;
+            uint32_t Width = 0, Height = 0;
+            VkPresentModeKHR PresentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
         };
 
         Swapchain() = default;
@@ -60,7 +64,6 @@ namespace aZero::RenderAPI
             std::swap(m_BackBufferViews, other.m_BackBufferViews);
             std::swap(m_ImageReadySemaphores, other.m_ImageReadySemaphores);
             std::swap(m_RenderCompleteSemaphores, other.m_RenderCompleteSemaphores);
-            std::swap(m_GraphicsQueue, other.m_GraphicsQueue);
             return *this;
         }
 
@@ -84,11 +87,11 @@ namespace aZero::RenderAPI
                 swapchainExtent = { .width = desc.Width, .height = desc.Height };
             }
 
-            VkExtent2D extents{ .width = desc.Width, .height = desc.Height };
+            VkExtent2D extents{ swapchainExtent };
             VkSwapchainCreateInfoKHR swapchainCI{
                 .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
                 .surface = desc.Surface,
-                .minImageCount = desc.FramesInFlight,
+                .minImageCount = std::min(desc.FramesInFlight, surfaceCaps.maxImageCount), // If desc inputs more than supported, we set max as count
                 .imageFormat = desc.Format,
                 .imageColorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR,
                 .imageExtent = extents,
@@ -96,7 +99,7 @@ namespace aZero::RenderAPI
                 .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VkImageUsageFlagBits::VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                 .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
                 .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-                .presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR
+                .presentMode = desc.PresentMode
             };
 
             if(!chkSucceed(vkCreateSwapchainKHR(core.GetLogicalDevice(), &swapchainCI, nullptr, &m_Swapchain)))
@@ -143,9 +146,6 @@ namespace aZero::RenderAPI
                 }
             }
 
-
-            m_GraphicsQueue.Init(core, RenderAPI::EQueueType::Graphics);
-
             m_Surface = desc.Surface;
             m_CreateInfo = swapchainCI;
             m_diCore = &core;
@@ -181,7 +181,7 @@ namespace aZero::RenderAPI
             }
 
             m_CreateInfo.oldSwapchain = m_Swapchain;
-            m_CreateInfo.imageExtent = { .width = static_cast<uint32_t>(width), .height = static_cast<uint32_t>(height) };
+
             chkSucceed(vkCreateSwapchainKHR(m_diCore->GetLogicalDevice(), &m_CreateInfo, nullptr, &m_Swapchain));
             for (auto i = 0; i < m_BackBuffers.size(); i++) {
                 vkDestroyImageView(m_diCore->GetLogicalDevice(), m_BackBufferViews[i], nullptr);
@@ -205,33 +205,33 @@ namespace aZero::RenderAPI
                 };
                 chkSucceed(vkCreateImageView(m_diCore->GetLogicalDevice(), &viewCI, nullptr, &m_BackBufferViews[i]));
             }
-            for (auto& semaphore : m_RenderCompleteSemaphores) {
-                vkDestroySemaphore(m_diCore->GetLogicalDevice(), semaphore.Get(), nullptr);
-            }
             m_RenderCompleteSemaphores.resize(m_BackBuffers.size());
             for (auto& semaphore : m_RenderCompleteSemaphores) {
                 semaphore = RenderAPI::Semaphore(*m_diCore, RenderAPI::ESemaphoreType::Binary);
             }
             vkDestroySwapchainKHR(m_diCore->GetLogicalDevice(), m_CreateInfo.oldSwapchain, nullptr);
+
+            m_CurrentFrameIndex = 0;
         }
 
-        struct PresentDesc
+        uint32_t GetBackbufferCount() const { return m_BackBuffers.size(); }
+        VkImage GetCurrentBackBuffer() const { return m_BackBuffers.at(m_CurrentBackBuffer); }
+        VkImageView GetCurrentBackBufferView() const { return m_BackBufferViews.at(m_CurrentBackBuffer); }
+        RenderAPI::Semaphore* GetImageReadySemaphore() { return &m_ImageReadySemaphores.at(m_CurrentFrameIndex); }
+        RenderAPI::Semaphore* GetRenderCompletedSemaphore() { return &m_RenderCompleteSemaphores.at(m_CurrentBackBuffer); }
+        const VkSwapchainCreateInfoKHR& GetCreateInfo() const { return m_CreateInfo; }
+	private:
+        bool AcquireNextImage()
         {
-            RenderAPI::CommandQueue* Queue;
-            std::vector<RenderAPI::Semaphore*> WaitOnSemaphores;
-        };
-
-        void NextFrame(uint32_t frameIndex)
-        {
-            m_CurrentFrameIndex = frameIndex;
-            chkSwapchain(vkAcquireNextImageKHR(m_diCore->GetLogicalDevice(), m_Swapchain, UINT64_MAX, m_ImageReadySemaphores.at(m_CurrentFrameIndex).Get(), VK_NULL_HANDLE, &m_CurrentBackBuffer)); // might not give us imageIndex that are in consecutive order, so we have a seperate index for the current swapchain and frameindex
+            // This might not give us imageIndex that are in consecutive order, so we have a seperate index for:
+            //      - The current back-buffer in the 0-1-2-n-0-1-2-n order
+            //      - The semaphore signalled when it's available to use for any command queue commands
+            return chkSwapchain(vkAcquireNextImageKHR(m_diCore->GetLogicalDevice(), m_Swapchain, UINT64_MAX, m_ImageReadySemaphores.at(m_CurrentFrameIndex).Get(), VK_NULL_HANDLE, &m_CurrentBackBuffer));
         }
 
-        void Present()
+        bool Present(RenderAPI::CommandQueue& queue)
         {
-            auto x = this->GetRenderCompletedSemaphore();
             std::array<VkSemaphore, 1> waitOnSemaphores{ this->GetRenderCompletedSemaphore()->Get() };
-
             VkPresentInfoKHR presentInfo{
                 .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
                 .waitSemaphoreCount = (uint32_t)waitOnSemaphores.size(),
@@ -240,28 +240,44 @@ namespace aZero::RenderAPI
                 .pSwapchains = &m_Swapchain,
                 .pImageIndices = &m_CurrentBackBuffer
             };
-            chkSwapchain(vkQueuePresentKHR(m_GraphicsQueue.Get(), &presentInfo));
+            m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % m_BackBuffers.size();
+
+            if (!chkSwapchain(vkQueuePresentKHR(queue.Get(), &presentInfo)))
+            {
+                return false;
+            }
+            return true;
         }
 
-        uint32_t GetFramesInFlight() const { return m_BackBuffers.size(); }
-        VkSwapchainKHR Get() const { return m_Swapchain; }
-        VkImage GetCurrentBackBuffer() const { return m_BackBuffers.at(m_CurrentBackBuffer); }
-        VkImageView GetCurrentBackBufferView() const { return m_BackBufferViews.at(m_CurrentBackBuffer); }
-        RenderAPI::Semaphore* GetImageReadySemaphore() { return &m_ImageReadySemaphores.at(m_CurrentFrameIndex); }
-        RenderAPI::Semaphore* GetRenderCompletedSemaphore() { return &m_RenderCompleteSemaphores.at(m_CurrentFrameIndex); }
-        uint32_t GetCurrentBackBufferIndex() const { return m_CurrentBackBuffer; }
-        VkSurfaceKHR GetSurface() const { return m_Surface; }
-        const VkSwapchainCreateInfoKHR& GetLastCreateInfo() const { return m_CreateInfo; }
-	private:
-        uint32_t m_CurrentFrameIndex;
-        uint32_t m_CurrentBackBuffer;
-        RenderAPI::CommandQueue m_GraphicsQueue;
+        /// <summary>
+        /// Incremented after a new back-backbuffer has been queued for present.
+        /// This is used to select a semaphore that in turn is used for signalling when the next back-backbuffer is acquired.
+        /// Used to wait so that the back-backbuffer isnt operated on until it's acquired.
+        /// </summary>
+        uint32_t m_CurrentFrameIndex = 0;
+
+        /// <summary>
+        /// The actual back-backbuffer index that is currently being acquired in the 0-1-2-n-0-1-2-n queue.
+        /// This represents the actual currently acquired back-buffer that will be used for the next present.
+        /// </summary>
+        uint32_t m_CurrentBackBuffer = 0;
+
         VkSurfaceKHR m_Surface;
 		VkSwapchainKHR m_Swapchain;
         VkSwapchainCreateInfoKHR m_CreateInfo;
         std::vector<VkImage> m_BackBuffers;
         std::vector<VkImageView> m_BackBufferViews;
+
+        /// <summary>
+        /// Signalled when the back-buffer is acquired.
+        /// Waited on before doing any commands on the back-buffer.
+        /// </summary>
         std::vector<RenderAPI::Semaphore> m_ImageReadySemaphores;
+
+        /// <summary>
+        /// Signalled when the back-buffer has had commands completed for it.
+        /// Waited on when trying to present the back-buffer.
+        /// </summary>
         std::vector<RenderAPI::Semaphore> m_RenderCompleteSemaphores;
         RenderAPI::Core* m_diCore = nullptr;
 	};

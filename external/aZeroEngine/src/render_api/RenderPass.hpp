@@ -74,6 +74,8 @@ namespace aZero::Pipeline
             std::swap(m_Reflection, other.m_Reflection);
             std::swap(m_Layout, other.m_Layout);
             std::swap(m_Pipeline, other.m_Pipeline);
+            std::swap(m_IsValid, other.m_IsValid);
+            std::swap(m_DescriptorSetCount, other.m_DescriptorSetCount);
             return *this;
         }
 
@@ -218,7 +220,7 @@ namespace aZero::Pipeline
 
             vkCmdBindPipeline(commandBuffer.Get(), VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipeline);
 
-            if(!renderDesc.DescriptorSets.empty())
+            if(!renderDesc.DescriptorSets.empty() && this->m_DescriptorSetCount == renderDesc.DescriptorSets.size())
             {
                 std::vector<VkDescriptorSet> descSets;
                 for (const auto& set : renderDesc.DescriptorSets)
@@ -314,6 +316,7 @@ namespace aZero::Pipeline
                 return false;
             }
 
+            m_IsValid = false;
             const Compiler::ShaderProgram::Reflection& reflection = desc.Program->GetReflection();
 
             VkPipelineShaderStageCreateInfo stageCi{
@@ -414,7 +417,7 @@ namespace aZero::Pipeline
         VkPipeline GetPipeline() const { return m_Pipeline; }
         VkPipelineLayout GetPipelineLayout() const { return m_Layout; }
         const Reflection& GetReflection() const { return m_Reflection; }
-
+        bool IsValid() const { return m_IsValid; }
     private:
         void PopulateReflection(const Compiler::ShaderProgram::Reflection& reflection)
         {
@@ -425,6 +428,8 @@ namespace aZero::Pipeline
             {
                 m_Reflection.ShaderStages |= module.Stage;
             }
+            m_DescriptorSetCount = reflection.DescriptorSets.size();
+            m_IsValid = true;
         }
 
         template<typename T>
@@ -439,6 +444,7 @@ namespace aZero::Pipeline
                 std::cout << "No program input.\n";
                 return false;
             }
+            m_IsValid = false;
 
             const Compiler::ShaderProgram::Reflection& reflection = desc.Program->GetReflection();
             std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
@@ -492,7 +498,7 @@ namespace aZero::Pipeline
 
             m_NumColorTargets = desc.RenderTargetFormats.size();
 
-            VkPipelineDepthStencilStateCreateInfo depthStencilState;
+            VkPipelineDepthStencilStateCreateInfo depthStencilState{};
             if (desc.DepthDesc.has_value())
             {
                 renderingCI.depthAttachmentFormat = desc.DepthDesc->DepthStencilFormat;
@@ -575,5 +581,7 @@ namespace aZero::Pipeline
         VkPipelineLayout m_Layout;
         VkPipeline m_Pipeline;
         aZero::RenderAPI::Core* m_diCore = nullptr;
+        bool m_IsValid = false;
+        uint32_t m_DescriptorSetCount = 0;
     };
 }

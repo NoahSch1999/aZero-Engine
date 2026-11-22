@@ -1,6 +1,7 @@
 #pragma once
 #include <meshoptimizer.h>
 #include <array>
+#include <algorithm>
 #include "misc/BoundingVolume.hpp"
 
 namespace aZero::Asset

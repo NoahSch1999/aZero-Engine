@@ -150,6 +150,19 @@ void aZero::RenderAPI::CommandBuffer::Copy(const RenderAPI::Image& srcImage, con
     this->Copy(srcImage, dstImage.Get(), dstImage.GetCurrentLayout());
 }
 
+void aZero::RenderAPI::CommandBuffer::BlitImages(const RenderAPI::Image& srcImage, const RenderAPI::Image& dstImage, const std::vector<VkImageBlit>& blits, VkFilter filter) const
+{
+    this->BlitImages(srcImage.Get(), srcImage.GetCurrentLayout(), dstImage.Get(), dstImage.GetCurrentLayout(), blits, filter);
+}
+
+
+void aZero::RenderAPI::CommandBuffer::BlitImages(VkImage srcImage, VkImageLayout srcImageLayout, VkImage dstImage, VkImageLayout dstImageLayout, const std::vector<VkImageBlit>& blits, VkFilter filter) const
+{
+    if (!blits.empty())
+    {
+        vkCmdBlitImage(m_CommandBuffer, srcImage, srcImageLayout, dstImage, dstImageLayout, blits.size(), blits.data(), filter);
+    }
+}
 
 void aZero::RenderAPI::CommandBuffer::ClearColorTarget(const RenderAPI::Image& image, const VkClearColorValue& color) const
 {

@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <filesystem>
 #include "render_api/Descriptor.hpp"
+#include "asset/AssetData.hpp"
 
 namespace aZero::System { class MaterialSystem; }
 namespace aZero

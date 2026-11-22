@@ -79,7 +79,20 @@ namespace aZero::Renderer
 				.dstOffset = (VkDeviceSize)dstOffset,
 				.size = (VkDeviceSize)size
 			};
-			m_Allocations[dstBuffer.Get()].CopyRegions.push_back(copyRegion);
+			bool foundExistingAlloc = false;
+			for (auto& region : m_Allocations[dstBuffer.Get()].CopyRegions)
+			{
+				if (region.dstOffset == dstOffset)
+				{
+					region = copyRegion;
+					foundExistingAlloc = true;
+				}
+			}
+
+			if (!foundExistingAlloc)
+			{
+				m_Allocations[dstBuffer.Get()].CopyRegions.push_back(copyRegion);
+			}
 			m_Allocations[dstBuffer.Get()].BarrierPtr = dstBuffer.GetTransitionPtr();
 		}
 
@@ -102,7 +115,21 @@ namespace aZero::Renderer
 				.dstOffset = (VkDeviceSize)dstOffset,
 				.size = (VkDeviceSize)size
 			};
-			m_Allocations[dstBuffer.Get()].CopyRegions.push_back(copyRegion);
+			bool foundExistingAlloc = false;
+			for (auto& region : m_Allocations[dstBuffer.Get()].CopyRegions)
+			{
+				if (region.dstOffset == dstOffset)
+				{
+					region = copyRegion;
+					foundExistingAlloc = true;
+				}
+			}
+
+			if (!foundExistingAlloc)
+			{
+				m_Allocations[dstBuffer.Get()].CopyRegions.push_back(copyRegion);
+			}
+
 			m_Allocations[dstBuffer.Get()].BarrierPtr = dstBuffer.GetTransitionPtr();
 		}
 

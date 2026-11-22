@@ -1,3 +1,4 @@
+#pragma once
 #include "asset/AssetData.hpp"
 #include "render_api/Descriptor.hpp"
 
@@ -35,17 +36,13 @@ namespace aZero::Asset
 		friend class System::TextureSystem;
 	public:
 		Texture() = default;
-		Texture(const std::string& name)
-		{
-			Name = name;
-		}
-		void SetData(const ImageData& data) { m_Data = data; m_IsDirty = true; }
-		void SetNotDirty() { m_IsDirty = false; }
-		bool IsDirty() const { return m_IsDirty; }
+		Texture(const std::string& name, System::TextureSystem& diTextureSystem);
+		void SetData(const ImageData& data) { m_Data = data; this->SetDirty(); }
+		void SetDirty();
 		RenderAPI::DescriptorIndex GetDescriptorIndex() const { return m_DescriptorIndex; }
 	private:
 		ImageData m_Data;
 		RenderAPI::DescriptorIndex m_DescriptorIndex = RenderAPI::g_InvalidDescriptorIndex;
-		bool m_IsDirty = true;
+		System::TextureSystem* m_diTextureSystem = nullptr;
 	};
 }

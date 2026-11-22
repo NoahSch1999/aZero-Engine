@@ -16,8 +16,8 @@ void asMain(uint3 dtid: SV_DispatchThreadID, uint3 gid: SV_GroupThreadID, uint32
     if (dtid.x < drawData.MeshletCount)
     {
         CameraData *camera = (CameraData *)Constants.CameraBufferPtr;
-        InstanceData *instanceData = (InstanceData*)Constants.InstanceDataBufferPtr;
-        BoundingSphere* meshletBounds = (BoundingSphere *)instanceData.MeshletBoundsBDA;
+        InstanceData *instanceData = (InstanceData *)Constants.InstanceDataBufferPtr;
+        BoundingSphere *meshletBounds = (BoundingSphere *)drawData.MeshletBoundsBufferPtr;
 
         // visible = camera.Frustum.Intersects( CreateBoundingSphere(mul(instanceData[drawIndex].WorldMatrix, float4(meshletBounds[dtid.x].Position, 1.f)).xyz, meshletBounds[dtid.x].Radius), camera->ViewMatrix);
         visible = true;
@@ -28,6 +28,8 @@ void asMain(uint3 dtid: SV_DispatchThreadID, uint3 gid: SV_GroupThreadID, uint32
             payload.MeshletIndex[index] = dtid.x;
             payload.InstanceIndex = drawData.InstanceIndex;
             payload.MeshletCount = drawData.MeshletCount;
+            payload.VertexBufferPtr = drawData.VertexBufferPtr;
+            payload.MeshletBufferPtr = drawData.MeshletBufferPtr;
         }
     }
     
