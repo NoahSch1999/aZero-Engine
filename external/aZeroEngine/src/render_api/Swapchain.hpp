@@ -134,6 +134,14 @@ namespace aZero::RenderAPI
                     .ArrayLayers = 1
                 };
                 m_BackBuffers.emplace_back(core, iDesc, i);
+
+                RenderAPI::Image::TransitionDesc t{
+                    .DstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    .DstAccessMask = VK_ACCESS_NONE,
+                    .NewLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                    .SubresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 }
+                };
+                m_BackBuffers.back().Transition(t);
             }
 
             m_BackBufferViews.resize(imageCount);
